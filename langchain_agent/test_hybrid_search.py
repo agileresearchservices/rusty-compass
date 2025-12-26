@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Test hybrid search implementation"""
+
+import time
+from langchain_ollama import OllamaEmbeddings
+from psycopg_pool import ConnectionPool
+from main import SimplePostgresVectorStore
+from config import (
+    EMBEDDINGS_MODEL,
+    DATABASE_URL,
+    DB_CONNECTION_KWARGS,
+    VECTOR_COLLECTION_NAME,
+    RETRIEVER_K,
+    RETRIEVER_FETCH_K,
+    RETRIEVER_LAMBDA_MULT,
+    OLLAMA_BASE_URL,
+)
+
+def test_search_methods():
+    """Compare different search methods"""
+
+    print("=" * 70)
+    print("Testing Hybrid Search Implementation")
+    print("=" * 70)
+
+    # Initialize components
+    print("\nInitializing components...")
+    embeddings = OllamaEmbeddings(model=EMBEDDINGS_MODEL, base_url=OLLAMA_BASE_URL)
+
+    connection_kwargs = DB_CONNECTION_KWARGS.copy()
+    pool = ConnectionPool(
+        conninfo=DATABASE_URL,
+        max_size=5,
+        kwargs=connection_kwargs
+    )
+
+    store = SimplePostgresVectorStore(
+        embeddings=embeddings,
+        collection_id=VECTOR_COLLECTION_NAME,
+        pool=pool
+    )
+
+    print("✓ Components initialized")
+
+    test_queries = [
+        ("machine learning algorithms", "Keyword-heavy query"),
+        ("what is supervised learning", "Semantic/conceptual query"),
+        ("Python Flask framework", "Mixed query"),
+        ("neural network training process", "Technical query"),
+    ]
+
+    for query, description in test_queries:
+        print(f"\n{'='*70}")
+        print(f"Query: {query}")
+        print(f"Type: {description}")
+        print(f"{'='*70}")
+
+        # Test pure vector (lambda=0.0)
+        print("\n[1] Vector Only (lambda=0.0)")
+        start = time.time()
+        vector_results = store.hybrid_search(query, k=3, lambda_mult=0.0)
+        vector_time = time.time() - start
+        print(f"    Time: {vector_time*1000:.1f}ms | Results: {len(vector_results)}")
+        for i, doc in enumerate(vector_results, 1):
+            source = doc.metadata.get('source', 'unknown')
+            preview = doc.page_content[:60].replace('\n', ' ') + "..."
+            print(f"    {i}. [{source}] {preview}")
+
+        # Test balanced hybrid (lambda=0.5)
+        print("\n[2] Balanced Hybrid (lambda=0.5)")
+        start = time.time()
+        balanced_results = store.hybrid_search(query, k=3, lambda_mult=0.5)
+        balanced_time = time.time() - start
+        print(f"    Time: {balanced_time*1000:.1f}ms | Results: {len(balanced_results)}")
+        for i, doc in enumerate(balanced_results, 1):
+            source = doc.metadata.get('source', 'unknown')
+            preview = doc.page_content[:60].replace('\n', ' ') + "..."
+            print(f"    {i}. [{source}] {preview}")
+
+        # Test configured hybrid (lambda from config)
+        print(f"\n[3] Config Hybrid (lambda={RETRIEVER_LAMBDA_MULT})")
+        start = time.time()
+        config_results = store.hybrid_search(query, k=3, lambda_mult=RETRIEVER_LAMBDA_MULT)
+        config_time = time.time() - start
+        print(f"    Time: {config_time*1000:.1f}ms | Results: {len(config_results)}")
+        for i, doc in enumerate(config_results, 1):
+            source = doc.metadata.get('source', 'unknown')
+            preview = doc.page_content[:60].replace('\n', ' ') + "..."
+            print(f"    {i}. [{source}] {preview}")
+
+        # Test pure text (lambda=1.0)
+        print("\n[4] Text Only (lambda=1.0)")
+        start = time.time()
+        text_results = store.hybrid_search(query, k=3, lambda_mult=1.0)
+        text_time = time.time() - start
+        print(f"    Time: {text_time*1000:.1f}ms | Results: {len(text_results)}")
+        for i, doc in enumerate(text_results, 1):
+            source = doc.metadata.get('source', 'unknown')
+            preview = doc.page_content[:60].replace('\n', ' ') + "..."
+            print(f"    {i}. [{source}] {preview}")
+
+    # Performance summary
+    print(f"\n{'='*70}")
+    print("Performance Summary:")
+    print(f"{'='*70}")
+    print(f"Vector search (lambda=0.0): Semantic matching with embeddings")
+    print(f"Balanced hybrid (lambda=0.5): Equal weight to semantic and lexical")
+    print(f"Config hybrid (lambda={RETRIEVER_LAMBDA_MULT}): {int(RETRIEVER_LAMBDA_MULT*100)}% lexical, {int((1-RETRIEVER_LAMBDA_MULT)*100)}% semantic")
+    print(f"Text search (lambda=1.0): Full-text search only")
+
+    pool.close()
+    print(f"\n{'='*70}")
+    print("✓ Testing complete")
+    print(f"{'='*70}")
+    print("\nNext steps:")
+    print("1. Review results from different search methods")
+    print("2. Notice how results vary with lambda_mult parameter")
+    print("3. Update config.py: RETRIEVER_SEARCH_TYPE = 'hybrid' to enable hybrid search")
+    print("4. Run agent: python main.py")
+
+if __name__ == "__main__":
+    test_search_methods()
