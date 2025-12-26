@@ -33,9 +33,8 @@ from psycopg_pool import ConnectionPool
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, BaseMessage, AIMessage, HumanMessage, ToolMessage
 from langchain_core.documents import Document
-import httpx
-
-from reranker import OllamaReranker
+import torch
+from transformers import AutoTokenizer, AutoModel
 
 # Suppress the LangGraphDeprecatedSinceV10 warning about create_react_agent migration.
 # The recommended replacement (langchain.agents.create_react_agent) doesn't exist yet in 1.2.0.
@@ -72,8 +71,7 @@ from config import (
     RERANKER_MODEL,
     RERANKER_FETCH_K,
     RERANKER_TOP_K,
-    RERANKER_TIMEOUT,
-    RERANKER_BATCH_SIZE,
+    RERANKER_INSTRUCTION,
     ENABLE_COMPACTION,
     MAX_CONTEXT_TOKENS,
     COMPACTION_THRESHOLD_PCT,
@@ -83,6 +81,101 @@ from config import (
     REASONING_ENABLED,
     REASONING_EFFORT,
 )
+
+
+# ============================================================================
+# QWEN3 RERANKER IMPLEMENTATION (LangChain-Compatible)
+# ============================================================================
+
+class Qwen3Reranker:
+    """
+    Cross-encoder reranker using Qwen3-Reranker-8B from HuggingFace.
+
+    Uses the proper transformers API to score document-query relevance pairs.
+    Implements the cross-encoder scoring methodology.
+    """
+
+    def __init__(self, model_name: str = "Qwen/Qwen3-Reranker-8B"):
+        """Initialize the Qwen3 cross-encoder model"""
+        self.model_name = model_name
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True).eval()
+
+        # Move to GPU if available
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.model = self.model.to(self.device)
+
+        logger.info(f"✓ Qwen3-Reranker loaded on device: {self.device}")
+
+    def score_documents(self, query: str, documents: List[Document]) -> List[tuple[Document, float]]:
+        """
+        Score documents by relevance to query using cross-encoder.
+
+        Args:
+            query: The search query
+            documents: List of documents to score
+
+        Returns:
+            List of (document, score) tuples sorted by score (descending)
+        """
+        if not documents:
+            return []
+
+        scores = []
+
+        for doc in documents:
+            # Prepare input pairs: [query, document]
+            pairs = [[query, doc.page_content]]
+
+            # Tokenize inputs
+            with torch.no_grad():
+                inputs = self.tokenizer(
+                    pairs,
+                    padding=True,
+                    truncation=True,
+                    return_tensors="pt",
+                    max_length=512
+                ).to(self.device)
+
+                # Get model output
+                outputs = self.model(**inputs)
+
+                # Extract logits and compute relevance scores
+                # The model outputs [not_relevant_logit, relevant_logit]
+                logits = outputs.logits[0]  # Get first (and only) pair result
+
+                # Compute softmax to get probabilities
+                probs = torch.softmax(logits, dim=-1)
+                score = float(probs[1].cpu())  # Score for "relevant" class
+
+            scores.append((doc, score))
+
+        # Sort by score descending
+        scores.sort(key=lambda x: x[1], reverse=True)
+
+        return scores
+
+    def rerank(self, query: str, documents: List[Document], top_k: int) -> List[tuple[Document, float]]:
+        """
+        Rerank documents and return top-k by relevance.
+
+        Args:
+            query: The search query
+            documents: List of documents to rerank
+            top_k: Number of top documents to return
+
+        Returns:
+            Top-k documents with scores, sorted by relevance
+        """
+        scored = self.score_documents(query, documents)
+
+        # Log results
+        logger.info(f"[Reranker] Reranked {len(documents)} → {min(top_k, len(scored))} docs")
+        for i, (doc, score) in enumerate(scored[:top_k], 1):
+            source = doc.metadata.get('source', 'unknown')
+            logger.info(f"  {i}. score={score:.4f} [{source}]")
+
+        return scored[:top_k]
 
 
 # ============================================================================
@@ -435,7 +528,8 @@ class LangChainAgent:
         self.app = None
         self.thread_id = None
         self.tools = []  # Will be populated in create_agent_graph
-        self.reranker = None  # Reranker for improving search result quality
+        self.retriever = None  # Base retriever
+        self.compression_retriever = None  # LangChain compression retriever with reranking
 
     def verify_prerequisites(self):
         """Verify that all required services are running"""
@@ -555,15 +649,20 @@ class LangChainAgent:
         )
         print("✓ Vector store initialized")
 
-        # Initialize Reranker
+        # Create base retriever
+        self.retriever = self.vector_store.as_retriever(
+            search_type="hybrid",
+            search_kwargs={
+                "k": RERANKER_FETCH_K if ENABLE_RERANKING else RETRIEVER_K,
+                "fetch_k": RETRIEVER_FETCH_K,
+                "lambda_mult": RETRIEVER_LAMBDA_MULT,
+            }
+        )
+
+        # Initialize Qwen3 Cross-Encoder Reranker
         if ENABLE_RERANKING:
-            print(f"Loading reranker: {RERANKER_MODEL}")
-            self.reranker = OllamaReranker(
-                model=RERANKER_MODEL,
-                base_url=OLLAMA_BASE_URL,
-                timeout=RERANKER_TIMEOUT,
-                batch_size=RERANKER_BATCH_SIZE
-            )
+            print(f"Loading cross-encoder reranker: {RERANKER_MODEL}")
+            self.reranker = Qwen3Reranker(model_name=RERANKER_MODEL)
             print("✓ Reranker initialized")
         else:
             self.reranker = None
@@ -686,6 +785,7 @@ Example response:
     def tools_node(self, state: CustomAgentState) -> Dict[str, Any]:
         """
         Execute tool calls with access to state (for dynamic lambda_mult).
+        Uses Qwen3 cross-encoder for reranking if enabled.
         """
         messages = state["messages"]
         last_message = messages[-1]
@@ -704,39 +804,26 @@ Example response:
             if tool_name == "knowledge_base":
                 query = tool_args.get("query", "")
 
-                # Fetch candidates (more if reranking enabled)
-                fetch_k = RERANKER_FETCH_K if ENABLE_RERANKING else RETRIEVER_K
-
-                # Execute with dynamic lambda
+                # Create retriever with dynamic lambda_mult
                 retriever = self.vector_store.as_retriever(
                     search_type="hybrid",
                     search_kwargs={
-                        "k": fetch_k,  # Fetch 15 if reranking, else 4
-                        "fetch_k": RETRIEVER_FETCH_K,  # 30 candidates per method
+                        "k": RERANKER_FETCH_K if ENABLE_RERANKING else RETRIEVER_K,
+                        "fetch_k": RETRIEVER_FETCH_K,
                         "lambda_mult": lambda_mult
                     }
                 )
 
+                # Get initial results
                 results = retriever.invoke(query)
 
                 # Apply reranking if enabled
                 if ENABLE_RERANKING and self.reranker and results:
                     print(f"[Reranker] Reranking {len(results)} candidates → top {RERANKER_TOP_K}")
-
-                    # Rerank documents
-                    reranked_results = self.reranker.rerank(
-                        query=query,
-                        documents=results,
-                        top_k=RERANKER_TOP_K
-                    )
-
-                    # Extract just documents (discard scores)
+                    reranked_results = self.reranker.rerank(query, results, RERANKER_TOP_K)
+                    # Extract just the documents (rerank returns tuples of (doc, score))
                     results = [doc for doc, score in reranked_results]
-
-                    print(f"[Reranker] Completed: {len(results)} docs selected")
-                else:
-                    # No reranking: truncate to RETRIEVER_K
-                    results = results[:RETRIEVER_K]
+                    print(f"[Reranker] Selected top {len(results)} documents")
 
                 content = "\n\n".join([doc.page_content for doc in results]) if results else "No relevant information found."
 
@@ -1235,8 +1322,11 @@ Summary:"""
 
     def cleanup(self):
         """Clean up resources"""
+        # Clear reranker model from memory if loaded
         if self.reranker:
-            self.reranker.close()
+            del self.reranker
+            torch.cuda.empty_cache()
+
         if self.pool:
             self.pool.close()
 
