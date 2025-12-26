@@ -23,13 +23,14 @@ import warnings
 import time
 import psycopg
 from pathlib import Path
-from typing import Sequence, Tuple, List, Optional
+from typing import Sequence, Tuple, List, Optional, Dict, Any, Union
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.prebuilt import create_react_agent
 from psycopg_pool import ConnectionPool
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, BaseMessage, AIMessage, HumanMessage
+from langchain_core.documents import Document
 import httpx
 
 # Suppress the LangGraphDeprecatedSinceV10 warning about create_react_agent migration.
@@ -71,28 +72,37 @@ from config import (
 class SimplePostgresVectorStore:
     """Simple wrapper for PostgreSQL vector similarity search"""
 
-    def __init__(self, embeddings, database_url: str, collection_id: str):
-        self.embeddings = embeddings
-        self.database_url = database_url
-        self.collection_id = collection_id
+    def __init__(
+        self,
+        embeddings: OllamaEmbeddings,
+        collection_id: str,
+        pool: ConnectionPool,
+        database_url: Optional[str] = None
+    ) -> None:
+        self.embeddings: OllamaEmbeddings = embeddings
+        self.collection_id: str = collection_id
+        self.pool: ConnectionPool = pool
+        self.database_url: Optional[str] = database_url  # Kept for backwards compatibility
 
-    def as_retriever(self, search_type="similarity", search_kwargs=None):
+    def as_retriever(
+        self,
+        search_type: str = "similarity",
+        search_kwargs: Optional[Dict[str, Any]] = None
+    ) -> "PostgresRetriever":
         """Return a retriever interface"""
         if search_kwargs is None:
             search_kwargs = {"k": RETRIEVER_K}
         return PostgresRetriever(self, search_kwargs.get("k", RETRIEVER_K))
 
-    def similarity_search(self, query: str, k: int = 4):
+    def similarity_search(self, query: str, k: int = 4) -> List[Document]:
         """Search for similar document chunks"""
-        from langchain_core.documents import Document
-
         try:
             # Generate query embedding
-            query_embedding = self.embeddings.embed_query(query)
-            embedding_str = "[" + ",".join(str(float(e)) for e in query_embedding) + "]"
+            query_embedding: List[float] = self.embeddings.embed_query(query)
+            embedding_str: str = "[" + ",".join(str(float(e)) for e in query_embedding) + "]"
 
             # Search in PostgreSQL document chunks
-            with psycopg.connect(self.database_url) as conn:
+            with self.pool.connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"""
@@ -105,8 +115,15 @@ class SimplePostgresVectorStore:
                         (self.collection_id, embedding_str, k)
                     )
 
-                    results = []
-                    for content, metadata in cur.fetchall():
+                    results: List[Document] = []
+                    for row in cur.fetchall():
+                        # Handle both dict rows (from pool) and tuple rows
+                        if isinstance(row, dict):
+                            content = row.get('content', '')
+                            metadata = row.get('metadata', {})
+                        else:
+                            content, metadata = row
+
                         doc = Document(
                             page_content=content,
                             metadata=metadata or {}
@@ -123,16 +140,27 @@ class SimplePostgresVectorStore:
 class PostgresRetriever:
     """Retriever interface for PostgreSQL vector store"""
 
-    def __init__(self, vector_store: SimplePostgresVectorStore, k: int = 4):
-        self.vector_store = vector_store
-        self.k = k
+    def __init__(self, vector_store: SimplePostgresVectorStore, k: int = 4) -> None:
+        self.vector_store: SimplePostgresVectorStore = vector_store
+        self.k: int = k
 
-    def invoke(self, input_dict):
-        """Retrieve documents for a query"""
+    def invoke(
+        self,
+        input_dict: Union[Dict[str, Any], str]
+    ) -> List[Document]:
+        """Retrieve documents for a query
+
+        Args:
+            input_dict: Either a dictionary with 'input' or 'query' key,
+                       or a string query directly
+
+        Returns:
+            List of Document objects matching the query
+        """
         if isinstance(input_dict, dict):
-            query = input_dict.get("input") or input_dict.get("query", "")
+            query: str = input_dict.get("input") or input_dict.get("query", "")
         else:
-            query = str(input_dict)
+            query: str = str(input_dict)
 
         return self.vector_store.similarity_search(query, k=self.k)
 
@@ -256,17 +284,7 @@ class LangChainAgent:
         )
         print("✓ Embeddings initialized")
 
-        # Initialize Vector Store using PostgreSQL with PGVector
-        print(f"Loading PostgreSQL vector store: {VECTOR_COLLECTION_NAME}")
-        # Create a simple retriever that uses PostgreSQL directly
-        self.vector_store = SimplePostgresVectorStore(
-            embeddings=self.embeddings,
-            database_url=DATABASE_URL,
-            collection_id=VECTOR_COLLECTION_NAME,
-        )
-        print("✓ Vector store initialized")
-
-        # Initialize Postgres connection pool
+        # Initialize Postgres connection pool (must be before vector store)
         print("Connecting to Postgres checkpoint store...")
         connection_kwargs = DB_CONNECTION_KWARGS.copy()
         self.pool = ConnectionPool(
@@ -274,6 +292,19 @@ class LangChainAgent:
             max_size=DB_POOL_MAX_SIZE,
             kwargs=connection_kwargs
         )
+        print("✓ Postgres connection pool initialized")
+
+        # Initialize Vector Store using PostgreSQL with PGVector
+        print(f"Loading PostgreSQL vector store: {VECTOR_COLLECTION_NAME}")
+        # Create a simple retriever that uses PostgreSQL directly
+        self.vector_store = SimplePostgresVectorStore(
+            embeddings=self.embeddings,
+            collection_id=VECTOR_COLLECTION_NAME,
+            pool=self.pool,
+        )
+        print("✓ Vector store initialized")
+
+        # Initialize checkpointer with existing pool
         self.checkpointer = PostgresSaver(self.pool)
         print("✓ Postgres checkpoint store initialized")
 
