@@ -38,8 +38,7 @@ __all__ = [
     "RERANKER_MODEL",
     "RERANKER_FETCH_K",
     "RERANKER_TOP_K",
-    "RERANKER_TIMEOUT",
-    "RERANKER_BATCH_SIZE",
+    "RERANKER_INSTRUCTION",
     # Agent configuration
     "RETRIEVER_TOOL_NAME",
     "RETRIEVER_TOOL_DESCRIPTION",
@@ -145,14 +144,19 @@ RETRIEVER_LAMBDA_MULT = 0.25
 RETRIEVER_SEARCH_TYPE = "hybrid"
 
 # ============================================================================
-# RERANKER CONFIGURATION
+# RERANKER CONFIGURATION (LangChain ContextualCompressionRetriever)
 # ============================================================================
 
 # Enable reranking of hybrid search results using cross-encoder model
 ENABLE_RERANKING = True
 
-# Reranker model from Ollama (cross-encoder for relevance scoring)
-RERANKER_MODEL = "dengcao/Qwen3-Reranker-8B:Q3_K_M"
+# Cross-encoder reranker model from HuggingFace
+# Options:
+#   - "BAAI/bge-reranker-v2-m3" (recommended, fast and accurate)
+#   - "BAAI/bge-reranker-v2-large" (more accurate but slower)
+#   - "Qwen/Qwen3-Reranker-8B" (multilingual, state-of-the-art)
+#   - "Qwen/Qwen3-Reranker-4B" (faster, smaller)
+RERANKER_MODEL = "Qwen/Qwen3-Reranker-8B"
 
 # Number of candidates to fetch before reranking
 RERANKER_FETCH_K = 15
@@ -160,11 +164,9 @@ RERANKER_FETCH_K = 15
 # Final number of documents to return after reranking
 RERANKER_TOP_K = 4
 
-# Reranker request timeout in seconds
-RERANKER_TIMEOUT = 30
-
-# Batch size for concurrent reranking requests (reserved for future optimization)
-RERANKER_BATCH_SIZE = 5
+# Custom instruction for reranker (domain-specific, affects 1-5% performance)
+# If None, uses default instruction
+RERANKER_INSTRUCTION = None
 
 # ============================================================================
 # QUERY EVALUATOR CONFIGURATION
