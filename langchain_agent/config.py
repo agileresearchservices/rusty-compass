@@ -11,9 +11,6 @@ __all__ = [
     "LLM_TEMPERATURE",
     "EMBEDDINGS_MODEL",
     "OLLAMA_BASE_URL",
-    # ChromaDB configuration
-    "CHROMA_DB_PATH",
-    "CHROMA_COLLECTION_NAME",
     # PostgreSQL configuration
     "POSTGRES_USER",
     "POSTGRES_PASSWORD",
@@ -78,16 +75,6 @@ EMBEDDINGS_MODEL = "nomic-embed-text:latest"
 OLLAMA_BASE_URL = "http://localhost:11434"
 
 # ============================================================================
-# CHROMADB CONFIGURATION
-# ============================================================================
-
-# ChromaDB persistence directory
-CHROMA_DB_PATH = "./chroma_db"
-
-# Collection name for storing documents
-CHROMA_COLLECTION_NAME = "local_knowledge"
-
-# ============================================================================
 # POSTGRES CONFIGURATION
 # ============================================================================
 
@@ -123,7 +110,7 @@ VECTOR_INDEX_TYPE = "ivfflat"
 # Vector similarity metric: "cosine", "l2", or "inner_product"
 VECTOR_SIMILARITY_METRIC = "cosine"
 
-# Collection name for vector storage (same as ChromaDB for migration compatibility)
+# Collection name for vector storage
 VECTOR_COLLECTION_NAME = "local_knowledge"
 
 # ============================================================================

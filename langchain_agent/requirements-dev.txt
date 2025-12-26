@@ -1,0 +1,28 @@
+# Development dependencies for Rusty Compass LangChain Agent
+# Install with: pip install -r requirements-dev.txt
+
+# Testing
+pytest>=7.0.0              # Testing framework
+pytest-cov>=4.0.0          # Coverage reporting
+pytest-timeout>=2.1.0      # Timeout handling for long-running tests
+
+# Code Quality
+black>=23.0.0              # Code formatter (PEP 8)
+pylint>=2.17.0             # Code quality checker
+flake8>=6.0.0              # Style guide enforcement
+mypy>=1.0.0                # Static type checker
+isort>=5.12.0              # Import sorting
+
+# Development Tools
+ipython>=8.0.0             # Enhanced Python shell
+ipdb>=0.13.0               # Debugger
+pre-commit>=3.0.0          # Pre-commit hooks
+
+# Documentation (optional)
+sphinx>=5.0.0              # Documentation generator
+sphinx-rtd-theme>=1.2.0    # ReadTheDocs theme
+
+# Performance & Profiling
+line-profiler>=4.0.0       # Line-by-line profiler
+memory-profiler>=0.60.0    # Memory usage profiler
+
