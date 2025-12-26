@@ -7,10 +7,37 @@ from reranker import OllamaReranker
 from config import OLLAMA_BASE_URL
 
 
+def show_reranking_comparison(query, original_docs, reranked_results, top_k):
+    """Display before/after comparison of reranking"""
+    print(f"\n  Query: {query}")
+    print(f"\n  BEFORE (Original Order from Retrieval):")
+    for i, doc in enumerate(original_docs[:top_k], 1):
+        preview = doc.page_content[:50].replace('\n', ' ')
+        print(f"    {i}. [{doc.metadata['source']}] {preview}...")
+
+    print(f"\n  AFTER (Reranked Order):")
+    for i, (doc, score) in enumerate(reranked_results, 1):
+        preview = doc.page_content[:50].replace('\n', ' ')
+        print(f"    {i}. score={score:.4f} [{doc.metadata['source']}] {preview}...")
+
+    # Show what changed
+    print(f"\n  CHANGES:")
+    original_order = [doc.metadata['source'] for doc in original_docs[:top_k]]
+    reranked_order = [doc.metadata['source'] for doc, _ in reranked_results]
+
+    if original_order == reranked_order:
+        print(f"    ➜ No reordering (all documents have similar relevance scores)")
+    else:
+        for i, (orig, reranked) in enumerate(zip(original_order, reranked_order)):
+            if orig != reranked:
+                orig_idx = original_order.index(reranked) + 1
+                print(f"    ➜ Position {i+1}: {orig} → {reranked} (moved from position {orig_idx})")
+
+
 def test_basic_reranking():
-    """Test basic reranking functionality"""
+    """Test basic reranking functionality with before/after comparison"""
     print("=" * 70)
-    print("Test 1: Basic Reranking")
+    print("Test 1: Basic Reranking (With Before/After Comparison)")
     print("=" * 70)
 
     try:
@@ -41,9 +68,7 @@ def test_basic_reranking():
         assert all(isinstance(r, tuple) and len(r) == 2 for r in results), "Results should be (doc, score) tuples"
 
         print(f"✓ Reranking completed")
-        print(f"  Query: {query}")
-        for i, (doc, score) in enumerate(results, 1):
-            print(f"  {i}. score={score:.4f} [{doc.metadata['source']}]")
+        show_reranking_comparison(query, docs, results, 2)
 
         reranker.close()
         print("\n✓ Test passed\n")
@@ -55,9 +80,9 @@ def test_basic_reranking():
 
 
 def test_score_range():
-    """Test that scores are in valid [0.0, 1.0] range"""
+    """Test that scores are in valid [0.0, 1.0] range with before/after comparison"""
     print("=" * 70)
-    print("Test 2: Score Range Validation")
+    print("Test 2: Score Range Validation (With Before/After Comparison)")
     print("=" * 70)
 
     try:
@@ -87,8 +112,10 @@ def test_score_range():
                     print(f"✗ Invalid score {score} for query '{query}'")
                     all_valid = False
 
+            show_reranking_comparison(query, docs, results, 3)
+
         if all_valid:
-            print(f"✓ All scores are in valid range [0.0, 1.0]")
+            print(f"\n✓ All scores are in valid range [0.0, 1.0]")
 
         reranker.close()
         print("\n✓ Test passed\n")
@@ -143,9 +170,9 @@ def test_top_k_selection():
 
 
 def test_sorted_by_score():
-    """Test that results are sorted by score in descending order"""
+    """Test that results are sorted by score in descending order with before/after comparison"""
     print("=" * 70)
-    print("Test 4: Score Sorting")
+    print("Test 4: Score Sorting (With Before/After Comparison)")
     print("=" * 70)
 
     try:
@@ -182,8 +209,7 @@ def test_sorted_by_score():
 
         if is_sorted:
             print(f"✓ Results are sorted by score (descending)")
-            for i, (doc, score) in enumerate(results, 1):
-                print(f"  {i}. score={score:.4f} [{doc.metadata['source']}]")
+            show_reranking_comparison(query, docs, results, 4)
         else:
             print(f"✗ Results are NOT sorted correctly")
             return False
@@ -261,9 +287,9 @@ def test_single_document():
 
 
 def test_performance():
-    """Test reranking performance"""
+    """Test reranking performance with before/after comparison"""
     print("=" * 70)
-    print("Test 7: Performance Benchmark")
+    print("Test 7: Performance Benchmark (With Before/After Comparison)")
     print("=" * 70)
 
     try:
@@ -272,7 +298,7 @@ def test_performance():
         # Create test documents
         docs = [
             Document(
-                page_content=f"Document {i}: {' '.join(['word'] * 50)}",
+                page_content=f"Document {i}: Information about topic with various keywords and content",
                 metadata={"source": f"doc{i}.txt"}
             )
             for i in range(15)
@@ -285,8 +311,13 @@ def test_performance():
         results = reranker.rerank(query, docs, top_k=4)
         elapsed = time.time() - start
 
-        print(f"Reranked {len(docs)} documents in {elapsed:.2f}s")
-        print(f"Average per document: {(elapsed / len(docs) * 1000):.1f}ms")
+        print(f"\nReranking Performance:")
+        print(f"  Total documents: {len(docs)}")
+        print(f"  Time elapsed: {elapsed:.2f}s")
+        print(f"  Average per document: {(elapsed / len(docs) * 1000):.1f}ms")
+
+        # Show before/after
+        show_reranking_comparison(query, docs, results, 4)
 
         # Performance target: < 1.5s for 15 documents
         if elapsed < 1.5:
