@@ -38,7 +38,7 @@ from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, BaseMessage, AIMessage, HumanMessage, ToolMessage
 from langchain_core.documents import Document
 import torch
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # Suppress the LangGraphDeprecatedSinceV10 warning about create_react_agent migration.
 # The recommended replacement (langchain.agents.create_react_agent) doesn't exist yet in 1.2.0.
@@ -95,21 +95,38 @@ class Qwen3Reranker:
     """
     Cross-encoder reranker using Qwen3-Reranker-8B from HuggingFace.
 
-    Uses the proper transformers API to score document-query relevance pairs.
-    Implements the cross-encoder scoring methodology.
+    Qwen3-Reranker is a causal language model that predicts "yes"/"no" tokens
+    to indicate relevance. Scores are computed from the probability of the "yes" token.
     """
 
-    def __init__(self, model_name: str = "Qwen/Qwen3-Reranker-8B"):
+    def __init__(self, model_name: str = "Qwen/Qwen3-Reranker-8B", instruction: Optional[str] = None):
         """Initialize the Qwen3 cross-encoder model"""
         self.model_name = model_name
+
+        # Load tokenizer with left padding (important for causal LM)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-        self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True).eval()
+        self.tokenizer.padding_side = "left"
+
+        # Load as causal language model (not embedding model)
+        self.model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, dtype=torch.float32).eval()
 
         # Move to GPU if available
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model = self.model.to(self.device)
 
+        # Get token IDs for "yes" and "no" for score computation
+        self.yes_token_id = self.tokenizer.convert_tokens_to_ids("yes")
+        self.no_token_id = self.tokenizer.convert_tokens_to_ids("no")
+
+        # Default instruction if not provided
+        self.instruction = instruction or "Given a web search query, retrieve relevant passages that answer the query"
+
         logger.info(f"✓ Qwen3-Reranker loaded on device: {self.device}")
+        logger.info(f"  Yes token ID: {self.yes_token_id}, No token ID: {self.no_token_id}")
+
+    def _format_input(self, query: str, document: str) -> str:
+        """Format input according to Qwen3-Reranker specification"""
+        return f"<Instruct>: {self.instruction}\n<Query>: {query}\n<Document>: {document}"
 
     def score_documents(self, query: str, documents: List[Document]) -> List[tuple[Document, float]]:
         """
@@ -128,44 +145,32 @@ class Qwen3Reranker:
         scores = []
 
         for doc in documents:
-            # Prepare input pairs: [query, document]
-            pairs = [[query, doc.page_content]]
+            # Format input according to model requirements
+            formatted_input = self._format_input(query, doc.page_content)
 
-            # Tokenize inputs
             with torch.no_grad():
+                # Tokenize
                 inputs = self.tokenizer(
-                    pairs,
+                    formatted_input,
                     padding=True,
                     truncation=True,
                     return_tensors="pt",
-                    max_length=512
+                    max_length=8192
                 ).to(self.device)
 
                 # Get model output
                 outputs = self.model(**inputs)
 
-                # Extract score from model output
-                # Qwen3-Reranker outputs logits directly or via last_hidden_state
-                if hasattr(outputs, 'logits'):
-                    logits = outputs.logits[0]
-                else:
-                    # For some model configurations, use last_hidden_state
-                    # Extract [CLS] token representation and compute score
-                    hidden_state = outputs.last_hidden_state[0, 0]  # [CLS] token
-                    logits = hidden_state
+                # Extract logits from the last token (what the model predicted at end)
+                logits = outputs.logits[:, -1, :]  # [batch_size, vocab_size]
 
-                # Ensure logits is 1D
-                if logits.dim() > 1:
-                    logits = logits.squeeze()
-
-                # Compute score
-                if logits.shape[0] >= 2:
-                    # If we have 2+ dimensions, use softmax
-                    probs = torch.softmax(logits, dim=-1)
-                    score = float(probs[1].cpu())  # Score for "relevant" class
-                else:
-                    # Single value - normalize to [0, 1]
-                    score = float(torch.sigmoid(logits).cpu())
+                # Compute score from yes/no token probabilities
+                # Stack yes and no logits for softmax computation
+                batch_scores = torch.stack([logits[:, self.no_token_id], logits[:, self.yes_token_id]], dim=1)
+                # Apply log_softmax for numerical stability
+                batch_scores = torch.nn.functional.log_softmax(batch_scores, dim=1)
+                # Extract probability of "yes" (index 1)
+                score = float(torch.exp(batch_scores[0, 1]).cpu())
 
             scores.append((doc, score))
 

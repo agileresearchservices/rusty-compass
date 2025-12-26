@@ -29,7 +29,14 @@
       "Bash(git push)",
       "Bash(psql:*)",
       "Bash(git commit:*)",
-      "Bash(.venv/bin/python:*)"
+      "Bash(.venv/bin/python:*)",
+      "Bash(timeout 180 python:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:apidog.com)",
+      "Bash(cat:*)",
+      "Bash(ollama pull:*)",
+      "Bash(git rm:*)",
+      "Bash(timeout 600 python:*)"
     ]
   }
 }
