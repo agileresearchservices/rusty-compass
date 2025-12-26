@@ -65,15 +65,15 @@ That's it! The `setup.py` script handles:
 
 ## Features
 
-✅ **7-Step Setup** - Automated initialization (`python setup.py`)
-✅ **Real-Time Streaming** - Thinking + responses stream character-by-character
-✅ **Hybrid Search** - Vector + full-text with RRF fusion
-✅ **Cross-Encoder Reranking** - Qwen3-Reranker-8B scores document relevance
-✅ **Query Evaluation** - Dynamic lambda adjustment based on query type
-✅ **Persistent Memory** - Multi-turn conversations with context preservation
-✅ **Conversation Management** - Create, list, load, clear conversations
-✅ **Local Only** - All data stays on your machine
-✅ **Fully Documented** - Setup, User, and Developer guides included
+✅ **7-Step Setup** - Automated initialization (`python setup.py`)  
+✅ **Real-Time Streaming** - Thinking + responses stream character-by-character  
+✅ **Hybrid Search** - Vector + full-text with RRF fusion  
+✅ **Cross-Encoder Reranking** - Qwen3-Reranker-8B scores document relevance  
+✅ **Query Evaluation** - Dynamic lambda adjustment based on query type  
+✅ **Persistent Memory** - Multi-turn conversations with context preservation  
+✅ **Conversation Management** - Create, list, load, clear conversations  
+✅ **Local Only** - All data stays on your machine  
+✅ **Fully Documented** - Setup, User, and Developer guides included  
 
 ## Example Queries
 
