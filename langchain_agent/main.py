@@ -560,11 +560,12 @@ class LangChainAgent:
         """
         Evaluate the query type and determine optimal lambda_mult for hybrid search.
 
-        Lambda interpretation:
-        - 0.0-0.2: Pure semantic (conceptual questions, "what is", "explain")
-        - 0.3-0.5: Balanced (mixed queries, "Python Flask tutorial")
-        - 0.6-0.8: Lexical-heavy (specific terms, brands, versions)
-        - 0.9-1.0: Pure lexical (dates, model numbers, part numbers)
+        Lambda interpretation (0.0=lexical, 1.0=semantic):
+        - 0.0-0.2: Pure lexical (dates, model numbers, part numbers, exact identifiers)
+        - 0.2-0.4: Lexical-heavy (specific versions, brands, frameworks)
+        - 0.4-0.6: Balanced (mixed queries with concepts and specific terms)
+        - 0.6-0.8: Semantic-heavy (framework guides, optimization techniques)
+        - 0.8-1.0: Pure semantic (conceptual questions, "what is", "explain")
         """
         messages = state["messages"]
 
@@ -584,29 +585,37 @@ class LangChainAgent:
 
 Query: "{last_user_msg}"
 
-Lambda_mult Guidelines:
-- 0.0-0.2: Pure SEMANTIC search
+Lambda_mult Guidelines (0.0=pure lexical/BM25, 1.0=pure semantic/vector):
+- 0.0-0.2: Pure LEXICAL search
+  * Use for: dates, model numbers, part numbers, exact product identifiers
+  * Example: "GPT-4 released in 2023" → 0.05
+  * Example: "Model XR-2500 specifications" → 0.1
+
+- 0.2-0.4: LEXICAL-heavy search
+  * Use for: specific versions, brands, frameworks, library updates
+  * Example: "Django 4.2 authentication" → 0.3
+  * Example: "Python 3.11 new features" → 0.25
+
+- 0.4-0.6: BALANCED hybrid search
+  * Use for: mixed queries with both specific terms and concepts
+  * Example: "Python Flask REST API tutorial" → 0.5
+  * Example: "React hooks best practices" → 0.45
+
+- 0.6-0.8: SEMANTIC-heavy search
+  * Use for: conceptual guides, optimization techniques, framework discussions
+  * Example: "PostgreSQL query optimization techniques" → 0.65
+  * Example: "Docker containerization guide" → 0.6
+
+- 0.8-1.0: Pure SEMANTIC search
   * Use for: conceptual questions, "what is", "explain", "how does", "why"
-  * Example: "What is machine learning?" → 0.1
-
-- 0.3-0.5: BALANCED hybrid search
-  * Use for: mixed queries with both concepts and specific terms
-  * Example: "Python Flask REST API tutorial" → 0.4
-
-- 0.6-0.8: LEXICAL-heavy search
-  * Use for: specific versions, brands, frameworks, proper nouns
-  * Example: "Django 4.2 authentication" → 0.7
-
-- 0.9-1.0: Pure LEXICAL search
-  * Use for: dates, model numbers, part numbers, exact identifiers
-  * Example: "GPT-4 released in 2023" → 0.95
-  * Example: "Model XR-2500 specifications" → 1.0
+  * Example: "What is machine learning?" → 0.95
+  * Example: "Explain how neural networks learn" → 0.9
 
 Respond with ONLY a JSON object in this format:
 {{"lambda_mult": <float between 0.0 and 1.0>, "reasoning": "<brief explanation>"}}
 
 Example response:
-{{"lambda_mult": 0.15, "reasoning": "Conceptual question about machine learning requires semantic understanding"}}"""
+{{"lambda_mult": 0.85, "reasoning": "Conceptual question about machine learning requires semantic understanding"}}"""
 
         try:
             # Call LLM for evaluation
