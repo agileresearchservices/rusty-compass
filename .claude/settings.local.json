@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker-compose up:*)",
+      "Bash(docker compose:*)",
+      "Bash(find:*)",
+      "Bash(tree:*)",
+      "Bash(source .venv/bin/activate)",
+      "Bash(pip install:*)",
+      "Bash(source:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "WebSearch",
+      "WebFetch(domain:python.langchain.com)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:reference.langchain.com)",
+      "WebFetch(domain:langchain-ai.github.io)",
+      "WebFetch(domain:docs.langchain.com)",
+      "WebFetch(domain:dev.to)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:www.marktechpost.com)",
+      "Bash(pip index:*)"
+    ]
+  }
+}

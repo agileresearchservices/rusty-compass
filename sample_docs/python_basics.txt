@@ -1,0 +1,46 @@
+Python Programming Basics
+
+Python is a high-level, interpreted programming language known for its simplicity and readability. Created by Guido van Rossum and first released in 1991, Python has become one of the most popular programming languages in the world.
+
+Key Features:
+- Simple and readable syntax that emphasizes code readability
+- Dynamically typed, so you don't need to declare variable types
+- Supports multiple programming paradigms including procedural, object-oriented, and functional programming
+- Extensive standard library with batteries included philosophy
+- Cross-platform compatibility (Windows, macOS, Linux)
+- Strong community support with thousands of third-party libraries
+
+Common Data Types:
+- int: Integer numbers
+- float: Floating-point numbers
+- str: Text strings
+- list: Ordered, mutable collections
+- tuple: Ordered, immutable collections
+- dict: Key-value pairs
+- set: Unordered collections of unique elements
+- bool: Boolean values (True/False)
+
+Control Flow:
+Python uses indentation to define code blocks. Common control structures include:
+- if/elif/else: Conditional statements
+- for loops: Iterate over sequences
+- while loops: Repeat while condition is true
+- break: Exit a loop
+- continue: Skip to next iteration
+
+Functions:
+Functions are defined with the def keyword and can accept parameters and return values:
+
+def greet(name):
+    return f"Hello, {name}!"
+
+Python uses duck typing, meaning an object's suitability is determined by the presence of certain methods and properties rather than the object's type itself.
+
+Modules and Packages:
+Python code is organized into modules and packages. The import statement allows you to use code from other modules:
+- import module: Import entire module
+- from module import name: Import specific item
+- from module import *: Import everything (generally discouraged)
+
+Virtual Environments:
+It's best practice to use virtual environments to isolate project dependencies. Tools like venv and virtualenv allow you to create isolated Python environments for different projects.
