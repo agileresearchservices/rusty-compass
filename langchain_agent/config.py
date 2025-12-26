@@ -32,6 +32,7 @@ __all__ = [
     "RETRIEVER_K",
     "RETRIEVER_FETCH_K",
     "RETRIEVER_LAMBDA_MULT",
+    "RETRIEVER_SEARCH_TYPE",
     # Agent configuration
     "RETRIEVER_TOOL_NAME",
     "RETRIEVER_TOOL_DESCRIPTION",
@@ -127,6 +128,9 @@ RETRIEVER_FETCH_K = 20
 
 # Lambda multiplier for hybrid search (0.0 = pure dense, 1.0 = pure lexical)
 RETRIEVER_LAMBDA_MULT = 0.25
+
+# Default search type: "similarity" (vector-only) or "hybrid" (vector + lexical using RRF)
+RETRIEVER_SEARCH_TYPE = "similarity"
 
 # ============================================================================
 # AGENT CONFIGURATION
