@@ -22,9 +22,13 @@ import uuid
 import warnings
 import time
 import json
+import logging
 import psycopg
 from pathlib import Path
 from typing import Sequence, Tuple, List, Optional, Dict, Any, Union, TypedDict, Annotated
+
+# Setup logging
+logger = logging.getLogger(__name__)
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.prebuilt import create_react_agent
@@ -140,13 +144,28 @@ class Qwen3Reranker:
                 # Get model output
                 outputs = self.model(**inputs)
 
-                # Extract logits and compute relevance scores
-                # The model outputs [not_relevant_logit, relevant_logit]
-                logits = outputs.logits[0]  # Get first (and only) pair result
+                # Extract score from model output
+                # Qwen3-Reranker outputs logits directly or via last_hidden_state
+                if hasattr(outputs, 'logits'):
+                    logits = outputs.logits[0]
+                else:
+                    # For some model configurations, use last_hidden_state
+                    # Extract [CLS] token representation and compute score
+                    hidden_state = outputs.last_hidden_state[0, 0]  # [CLS] token
+                    logits = hidden_state
 
-                # Compute softmax to get probabilities
-                probs = torch.softmax(logits, dim=-1)
-                score = float(probs[1].cpu())  # Score for "relevant" class
+                # Ensure logits is 1D
+                if logits.dim() > 1:
+                    logits = logits.squeeze()
+
+                # Compute score
+                if logits.shape[0] >= 2:
+                    # If we have 2+ dimensions, use softmax
+                    probs = torch.softmax(logits, dim=-1)
+                    score = float(probs[1].cpu())  # Score for "relevant" class
+                else:
+                    # Single value - normalize to [0, 1]
+                    score = float(torch.sigmoid(logits).cpu())
 
             scores.append((doc, score))
 
