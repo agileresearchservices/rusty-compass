@@ -34,7 +34,7 @@ rusty-compass/
 │   ├── machine_learning_intro.txt
 │   └── web_development.txt
 └── langchain_agent/                   # Main application
-    ├── main.py                        # Core agent logic (1430 lines)
+    ├── main.py                        # Core agent logic (1437 lines)
     ├── config.py                      # All configuration constants
     ├── setup.py                       # Unified initialization script
     ├── requirements.txt               # Production dependencies
@@ -322,7 +322,7 @@ if __name__ == "__main__":
 
 ### Branch Naming
 
-**Current branch**: `claude/add-claude-documentation-vXp5b`
+**Current branch**: `claude/add-claude-documentation-zcLY1`
 
 **Convention**: `claude/<description>-<session-id>`
 - `claude/` prefix is REQUIRED for push permissions
@@ -366,7 +366,7 @@ EOF
 
 **CRITICAL**: Always use `-u origin <branch-name>`:
 ```bash
-git push -u origin claude/add-claude-documentation-vXp5b
+git push -u origin claude/add-claude-documentation-zcLY1
 ```
 
 **Retry logic**: If push fails with network error, retry up to 4 times with exponential backoff (2s, 4s, 8s, 16s).
