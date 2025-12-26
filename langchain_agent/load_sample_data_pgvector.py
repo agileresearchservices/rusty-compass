@@ -8,6 +8,7 @@ import os
 import sys
 import json
 from pathlib import Path
+from typing import List, Tuple
 from langchain_ollama import OllamaEmbeddings
 import psycopg
 from config import (
@@ -23,7 +24,7 @@ CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 
 
-def load_documents_from_directory(docs_dir: str) -> list[tuple[str, str]]:
+def load_documents_from_directory(docs_dir: str) -> List[Tuple[str, str]]:
     """
     Load all text documents from a directory.
     Returns list of (filename, content) tuples.
@@ -52,7 +53,7 @@ def load_documents_from_directory(docs_dir: str) -> list[tuple[str, str]]:
     return documents
 
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
     """
     Split text into overlapping chunks.
     """
@@ -77,7 +78,7 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
     return chunks
 
 
-def load_into_vector_store(documents: list[tuple[str, str]]) -> int:
+def load_into_vector_store(documents: List[Tuple[str, str]]) -> int:
     """
     Load and chunk documents into PostgreSQL vector store.
     Stores chunks in document_chunks table with embeddings.
@@ -133,29 +134,56 @@ def load_into_vector_store(documents: list[tuple[str, str]]) -> int:
                     chunks = chunk_text(content, CHUNK_SIZE, CHUNK_OVERLAP)
                     print(f"  → Split into {len(chunks)} chunks")
 
-                    # Insert chunks with embeddings
-                    for chunk_idx, chunk in enumerate(chunks):
-                        try:
-                            # Generate embedding for chunk
-                            embedding = embeddings.embed_query(chunk)
-                            embedding_str = "[" + ",".join(str(float(e)) for e in embedding) + "]"
+                    # Generate all embeddings in batch
+                    chunk_list: List[str] = list(chunks)
+                    print(f"  → Generating embeddings for {len(chunk_list)} chunks...")
 
-                            # Insert chunk
-                            cur.execute(
-                                """
-                                INSERT INTO document_chunks (document_id, chunk_index, content, embedding)
-                                VALUES (%s, %s, %s, %s)
-                                """,
-                                (doc_id, chunk_idx, chunk, embedding_str)
-                            )
-                            total_chunks += 1
+                    try:
+                        # Batch embed all chunks at once (much faster than sequential)
+                        chunk_embeddings: List[List[float]] = embeddings.embed_documents(chunk_list)
+                        print(f"  ✓ Generated {len(chunk_embeddings)} embeddings")
 
-                            if (chunk_idx + 1) % 5 == 0:
-                                print(f"    ✓ Embedded chunks {chunk_idx + 1}/{len(chunks)}")
+                        # Insert chunks with pre-generated embeddings
+                        for chunk_idx, (chunk, embedding) in enumerate(zip(chunk_list, chunk_embeddings)):
+                            try:
+                                embedding_str = "[" + ",".join(str(float(e)) for e in embedding) + "]"
 
-                        except Exception as e:
-                            print(f"    ⚠ Error embedding chunk {chunk_idx}: {e}")
-                            continue
+                                # Insert chunk
+                                cur.execute(
+                                    """
+                                    INSERT INTO document_chunks (document_id, chunk_index, content, embedding)
+                                    VALUES (%s, %s, %s, %s)
+                                    """,
+                                    (doc_id, chunk_idx, chunk, embedding_str)
+                                )
+                                total_chunks += 1
+
+                                if (chunk_idx + 1) % 10 == 0:
+                                    print(f"    ✓ Inserted chunks {chunk_idx + 1}/{len(chunks)}")
+
+                            except Exception as e:
+                                print(f"    ⚠ Error inserting chunk {chunk_idx}: {e}")
+                                continue
+
+                    except Exception as e:
+                        # Fallback to sequential embedding if batch fails
+                        print(f"    ⚠ Error generating embeddings: {e}")
+                        print(f"    Falling back to sequential embedding...")
+                        for chunk_idx, chunk in enumerate(chunk_list):
+                            try:
+                                embedding = embeddings.embed_query(chunk)
+                                embedding_str = "[" + ",".join(str(float(e)) for e in embedding) + "]"
+                                cur.execute(
+                                    """
+                                    INSERT INTO document_chunks (document_id, chunk_index, content, embedding)
+                                    VALUES (%s, %s, %s, %s)
+                                    """,
+                                    (doc_id, chunk_idx, chunk, embedding_str)
+                                )
+                                total_chunks += 1
+                            except Exception as inner_e:
+                                print(f"    ⚠ Error embedding chunk {chunk_idx}: {inner_e}")
+                                continue
 
                     print(f"  ✓ Loaded {len(chunks)} chunks")
 
