@@ -35,6 +35,8 @@ from langchain_core.messages import SystemMessage, BaseMessage, AIMessage, Human
 from langchain_core.documents import Document
 import httpx
 
+from reranker import OllamaReranker
+
 # Suppress the LangGraphDeprecatedSinceV10 warning about create_react_agent migration.
 # The recommended replacement (langchain.agents.create_react_agent) doesn't exist yet in 1.2.0.
 # This warning is from an incomplete migration path and will be resolved in a future update.
@@ -66,6 +68,12 @@ from config import (
     POSTGRES_USER,
     POSTGRES_PASSWORD,
     POSTGRES_DB,
+    ENABLE_RERANKING,
+    RERANKER_MODEL,
+    RERANKER_FETCH_K,
+    RERANKER_TOP_K,
+    RERANKER_TIMEOUT,
+    RERANKER_BATCH_SIZE,
     ENABLE_COMPACTION,
     MAX_CONTEXT_TOKENS,
     COMPACTION_THRESHOLD_PCT,
@@ -427,6 +435,7 @@ class LangChainAgent:
         self.app = None
         self.thread_id = None
         self.tools = []  # Will be populated in create_agent_graph
+        self.reranker = None  # Reranker for improving search result quality
 
     def verify_prerequisites(self):
         """Verify that all required services are running"""
@@ -545,6 +554,19 @@ class LangChainAgent:
             pool=self.pool,
         )
         print("✓ Vector store initialized")
+
+        # Initialize Reranker
+        if ENABLE_RERANKING:
+            print(f"Loading reranker: {RERANKER_MODEL}")
+            self.reranker = OllamaReranker(
+                model=RERANKER_MODEL,
+                base_url=OLLAMA_BASE_URL,
+                timeout=RERANKER_TIMEOUT,
+                batch_size=RERANKER_BATCH_SIZE
+            )
+            print("✓ Reranker initialized")
+        else:
+            self.reranker = None
 
         # Initialize checkpointer with existing pool
         self.checkpointer = PostgresSaver(self.pool)
@@ -682,17 +704,40 @@ Example response:
             if tool_name == "knowledge_base":
                 query = tool_args.get("query", "")
 
+                # Fetch candidates (more if reranking enabled)
+                fetch_k = RERANKER_FETCH_K if ENABLE_RERANKING else RETRIEVER_K
+
                 # Execute with dynamic lambda
                 retriever = self.vector_store.as_retriever(
                     search_type="hybrid",
                     search_kwargs={
-                        "k": RETRIEVER_K,
-                        "fetch_k": RETRIEVER_FETCH_K,
+                        "k": fetch_k,  # Fetch 15 if reranking, else 4
+                        "fetch_k": RETRIEVER_FETCH_K,  # 30 candidates per method
                         "lambda_mult": lambda_mult
                     }
                 )
 
                 results = retriever.invoke(query)
+
+                # Apply reranking if enabled
+                if ENABLE_RERANKING and self.reranker and results:
+                    print(f"[Reranker] Reranking {len(results)} candidates → top {RERANKER_TOP_K}")
+
+                    # Rerank documents
+                    reranked_results = self.reranker.rerank(
+                        query=query,
+                        documents=results,
+                        top_k=RERANKER_TOP_K
+                    )
+
+                    # Extract just documents (discard scores)
+                    results = [doc for doc, score in reranked_results]
+
+                    print(f"[Reranker] Completed: {len(results)} docs selected")
+                else:
+                    # No reranking: truncate to RETRIEVER_K
+                    results = results[:RETRIEVER_K]
+
                 content = "\n\n".join([doc.page_content for doc in results]) if results else "No relevant information found."
 
                 # Create tool response message
@@ -1190,6 +1235,8 @@ Summary:"""
 
     def cleanup(self):
         """Clean up resources"""
+        if self.reranker:
+            self.reranker.close()
         if self.pool:
             self.pool.close()
 
