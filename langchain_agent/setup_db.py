@@ -97,6 +97,106 @@ def init_metadata_table():
         raise
 
 
+def enable_pgvector_extension():
+    """Enable the pgvector extension in the database"""
+    print("Enabling pgvector extension...")
+
+    try:
+        with psycopg.connect(DATABASE_URL) as conn:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                # Enable vector extension
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                print("✓ pgvector extension enabled successfully")
+    except Exception as e:
+        print(f"✗ Error enabling pgvector extension: {e}")
+        raise
+
+
+def create_vector_tables():
+    """Create tables for vector storage with PGVector"""
+    print("Creating vector storage tables...")
+
+    try:
+        with psycopg.connect(DATABASE_URL) as conn:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                # Create collections table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS collections (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        description TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                # Create documents table with vector column
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS documents (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        content TEXT NOT NULL,
+                        embedding vector(768) NOT NULL,
+                        metadata JSONB,
+                        collection_id TEXT REFERENCES collections(id),
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                # Create document_chunks table for semantic chunking
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS document_chunks (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+                        chunk_index INTEGER NOT NULL,
+                        content TEXT NOT NULL,
+                        embedding vector(768) NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                print("✓ Vector storage tables created successfully")
+    except Exception as e:
+        print(f"✗ Error creating vector tables: {e}")
+        raise
+
+
+def create_vector_indexes():
+    """Create indexes for vector similarity search"""
+    print("Creating vector indexes...")
+
+    try:
+        with psycopg.connect(DATABASE_URL) as conn:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                # Create IVFFlat index on documents table for faster similarity search
+                # IVFFlat is faster than HNSW for read-heavy workloads with static data
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS documents_embedding_idx
+                    ON documents USING ivfflat (embedding vector_cosine_ops)
+                    WITH (lists = 100)
+                """)
+
+                # Create IVFFlat index on document_chunks table
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS document_chunks_embedding_idx
+                    ON document_chunks USING ivfflat (embedding vector_cosine_ops)
+                    WITH (lists = 100)
+                """)
+
+                # Create regular index on collection_id for filtering
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS documents_collection_id_idx
+                    ON documents(collection_id)
+                """)
+
+                print("✓ Vector indexes created successfully")
+    except Exception as e:
+        print(f"✗ Error creating vector indexes: {e}")
+        raise
+
+
 def verify_connection():
     """Verify connection to the database"""
     print("Verifying database connection...")
@@ -123,6 +223,12 @@ def main():
         create_database()
         print()
         verify_connection()
+        print()
+        enable_pgvector_extension()
+        print()
+        create_vector_tables()
+        print()
+        create_vector_indexes()
         print()
         init_checkpoint_tables()
         print()

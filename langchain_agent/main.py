@@ -4,7 +4,7 @@ LangChain Agent with Real-Time Streaming, Local Knowledge Base, and Persistent M
 
 A production-grade ReAct agent with the following features:
 - Real-time character-by-character streaming of agent thinking and final responses
-- Local knowledge base using ChromaDB with semantic search
+- Local knowledge base using PostgreSQL with PGVector for semantic search
 - Persistent conversation memory using PostgreSQL
 - Intelligent tool usage for knowledge retrieval
 - Multi-turn conversations with context preservation
@@ -12,7 +12,7 @@ A production-grade ReAct agent with the following features:
 Powered by:
 - LLM: Ollama (gpt-oss:20b)
 - Embeddings: Ollama (nomic-embed-text:latest)
-- Vector Store: ChromaDB
+- Vector Store: PostgreSQL with PGVector
 - Memory: PostgreSQL with LangGraph checkpointer
 - Framework: LangGraph with ReAct agent pattern
 """
@@ -25,7 +25,6 @@ import psycopg
 from pathlib import Path
 from typing import Sequence, Tuple, List, Optional
 from langchain_ollama import ChatOllama, OllamaEmbeddings
-from langchain_chroma import Chroma
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.prebuilt import create_react_agent
 from psycopg_pool import ConnectionPool
@@ -48,6 +47,8 @@ from config import (
     DATABASE_URL,
     DB_CONNECTION_KWARGS,
     DB_POOL_MAX_SIZE,
+    VECTOR_COLLECTION_NAME,
+    RETRIEVER_K,
     RETRIEVER_TOOL_NAME,
     RETRIEVER_TOOL_DESCRIPTION,
     OLLAMA_BASE_URL,
@@ -67,13 +68,82 @@ from config import (
 )
 
 
+class SimplePostgresVectorStore:
+    """Simple wrapper for PostgreSQL vector similarity search"""
+
+    def __init__(self, embeddings, database_url: str, collection_id: str):
+        self.embeddings = embeddings
+        self.database_url = database_url
+        self.collection_id = collection_id
+
+    def as_retriever(self, search_type="similarity", search_kwargs=None):
+        """Return a retriever interface"""
+        if search_kwargs is None:
+            search_kwargs = {"k": RETRIEVER_K}
+        return PostgresRetriever(self, search_kwargs.get("k", RETRIEVER_K))
+
+    def similarity_search(self, query: str, k: int = 4):
+        """Search for similar document chunks"""
+        from langchain_core.documents import Document
+
+        try:
+            # Generate query embedding
+            query_embedding = self.embeddings.embed_query(query)
+            embedding_str = "[" + ",".join(str(float(e)) for e in query_embedding) + "]"
+
+            # Search in PostgreSQL document chunks
+            with psycopg.connect(self.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        SELECT dc.content, d.metadata FROM document_chunks dc
+                        JOIN documents d ON dc.document_id = d.id
+                        WHERE d.collection_id = %s
+                        ORDER BY dc.embedding <-> %s::vector
+                        LIMIT %s
+                        """,
+                        (self.collection_id, embedding_str, k)
+                    )
+
+                    results = []
+                    for content, metadata in cur.fetchall():
+                        doc = Document(
+                            page_content=content,
+                            metadata=metadata or {}
+                        )
+                        results.append(doc)
+
+                    return results
+
+        except Exception as e:
+            print(f"Error during similarity search: {e}")
+            return []
+
+
+class PostgresRetriever:
+    """Retriever interface for PostgreSQL vector store"""
+
+    def __init__(self, vector_store: SimplePostgresVectorStore, k: int = 4):
+        self.vector_store = vector_store
+        self.k = k
+
+    def invoke(self, input_dict):
+        """Retrieve documents for a query"""
+        if isinstance(input_dict, dict):
+            query = input_dict.get("input") or input_dict.get("query", "")
+        else:
+            query = str(input_dict)
+
+        return self.vector_store.similarity_search(query, k=self.k)
+
+
 class LangChainAgent:
     """
     Main agent class that manages the LLM, tools, and conversation state.
 
     Handles:
     - Real-time streaming of agent thinking and responses
-    - Integration with local knowledge base (ChromaDB)
+    - Integration with local knowledge base (PostgreSQL + PGVector)
     - Persistent conversation memory (PostgreSQL)
     - Interactive multi-turn conversations
     """
@@ -104,20 +174,38 @@ class LangChainAgent:
             print(f"  Connection string: {DATABASE_URL}")
             sys.exit(1)
 
-        # Check ChromaDB persistence
-        chroma_path = Path(CHROMA_DB_PATH)
-        if not chroma_path.exists():
-            print(f"✗ ChromaDB not initialized: {CHROMA_DB_PATH}")
-            print("  Run: python load_sample_data.py")
+        # Check PGVector extension
+        try:
+            with psycopg.connect(DATABASE_URL) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector')")
+                    if cur.fetchone()[0]:
+                        print("✓ PGVector extension is enabled")
+                    else:
+                        print("✗ PGVector extension not found")
+                        print("  Run: python setup_db.py")
+                        sys.exit(1)
+        except Exception as e:
+            print(f"✗ Error checking PGVector extension: {e}")
             sys.exit(1)
-        print("✓ ChromaDB is initialized")
 
-        # Check for sample documents (check for sqlite3 or parquet files)
-        chroma_sqlite = chroma_path / "chroma.sqlite3"
-        chroma_parquet = chroma_path / "chroma.parquet"
-        if not chroma_sqlite.exists() and not chroma_parquet.exists():
-            print("✗ No data in ChromaDB")
-            print("  Run: python load_sample_data.py")
+        # Check if documents table has data
+        try:
+            with psycopg.connect(DATABASE_URL) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT COUNT(*) FROM documents WHERE collection_id = %s",
+                        (VECTOR_COLLECTION_NAME,)
+                    )
+                    doc_count = cur.fetchone()[0]
+                    if doc_count == 0:
+                        print(f"✗ No documents found in vector store")
+                        print("  Run: python load_sample_data_pgvector.py")
+                        sys.exit(1)
+                    print(f"✓ Vector store has {doc_count} documents")
+        except Exception as e:
+            print(f"✗ Error checking vector store: {e}")
+            print("  Make sure vector tables exist. Run: python setup_db.py")
             sys.exit(1)
 
         # Check Ollama connection
@@ -168,12 +256,13 @@ class LangChainAgent:
         )
         print("✓ Embeddings initialized")
 
-        # Initialize Vector Store
-        print(f"Loading ChromaDB: {CHROMA_DB_PATH}")
-        self.vector_store = Chroma(
-            collection_name=CHROMA_COLLECTION_NAME,
-            embedding_function=self.embeddings,
-            persist_directory=CHROMA_DB_PATH,
+        # Initialize Vector Store using PostgreSQL with PGVector
+        print(f"Loading PostgreSQL vector store: {VECTOR_COLLECTION_NAME}")
+        # Create a simple retriever that uses PostgreSQL directly
+        self.vector_store = SimplePostgresVectorStore(
+            embeddings=self.embeddings,
+            database_url=DATABASE_URL,
+            collection_id=VECTOR_COLLECTION_NAME,
         )
         print("✓ Vector store initialized")
 
