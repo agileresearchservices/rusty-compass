@@ -845,11 +845,29 @@ Example response:
 
                 # Apply reranking if enabled
                 if ENABLE_RERANKING and self.reranker and results:
-                    print(f"[Reranker] Reranking {len(results)} candidates → top {RERANKER_TOP_K}")
+                    # Capture original order for comparison
+                    original_sources = [doc.metadata.get('source', 'unknown') for doc in results]
+
+                    print(f"\n[Reranker] Processing {len(results)} candidates...")
                     reranked_results = self.reranker.rerank(query, results, RERANKER_TOP_K)
-                    # Extract just the documents (rerank returns tuples of (doc, score))
-                    results = [doc for doc, score in reranked_results]
-                    print(f"[Reranker] Selected top {len(results)} documents")
+
+                    # Extract documents with scores for logging
+                    results_with_scores = [(doc, score) for doc, score in reranked_results]
+                    results = [doc for doc, score in results_with_scores]
+
+                    # Log reranking results with scores
+                    print(f"[Reranker] Reranking complete → top {len(results)} selected:")
+                    for i, (doc, score) in enumerate(results_with_scores, 1):
+                        source = doc.metadata.get('source', 'unknown')
+                        relevance_bar = "█" * int(score * 20)
+                        print(f"  {i}. score={score:.4f} {relevance_bar} [{source}]")
+
+                    # Log order changes if applicable
+                    reranked_sources = [doc.metadata.get('source', 'unknown') for doc in results]
+                    if original_sources[:len(reranked_sources)] != reranked_sources:
+                        print(f"[Reranker] Order changed: {original_sources[:len(reranked_sources)]} → {reranked_sources}")
+                    else:
+                        print(f"[Reranker] Order unchanged (already optimally ranked)")
 
                 content = "\n\n".join([doc.page_content for doc in results]) if results else "No relevant information found."
 
