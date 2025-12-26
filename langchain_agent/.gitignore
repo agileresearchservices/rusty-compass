@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE & Editors
+.vscode/
+.idea/
+.project
+.pydevproject
+.settings/
+*.swp
+*.swo
+*~
+.DS_Store
+.sublime-project
+.sublime-workspace
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Database
+postgres_data/
+*.db
+*.sqlite
+*.sqlite3
+chroma.sqlite3
+chroma_db/
+
+# Logs
+*.log
+logs/
+*.pot
+
+# HuggingFace Cache (optional - comment out if you want to cache models)
+.cache/huggingface/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Project-specific
+langchain_agent/__pycache__/
+*.pyc
+.claude/
+
+# OS-specific
+.DS_Store
+Thumbs.db

@@ -101,7 +101,17 @@ class Qwen3Reranker:
     """
 
     def __init__(self, model_name: str = "Qwen/Qwen3-Reranker-8B", instruction: Optional[str] = None):
-        """Initialize the Qwen3 cross-encoder model"""
+        """
+        Initialize the Qwen3 cross-encoder reranker model.
+
+        Args:
+            model_name: HuggingFace model identifier (default: Qwen/Qwen3-Reranker-8B)
+            instruction: Custom domain instruction for reranking (optional)
+
+        Raises:
+            OSError: If model cannot be downloaded from HuggingFace
+            RuntimeError: If required CUDA libraries are missing
+        """
         self.model_name = model_name
 
         # Load tokenizer with left padding (important for causal LM)
@@ -131,14 +141,20 @@ class Qwen3Reranker:
 
     def score_documents(self, query: str, documents: List[Document]) -> List[tuple[Document, float]]:
         """
-        Score documents by relevance to query using cross-encoder.
+        Score documents by relevance to query using cross-encoder model.
+
+        Uses Qwen3-Reranker to evaluate query-document pairs and assign relevance scores.
 
         Args:
-            query: The search query
-            documents: List of documents to score
+            query: The search query string
+            documents: List of LangChain Document objects to score
 
         Returns:
-            List of (document, score) tuples sorted by score (descending)
+            List of (Document, score) tuples sorted by score in descending order.
+            Scores are in range [0.0, 1.0] representing P(relevant)
+
+        Raises:
+            ValueError: If documents list is empty
         """
         if not documents:
             return []
@@ -182,15 +198,25 @@ class Qwen3Reranker:
 
     def rerank(self, query: str, documents: List[Document], top_k: int) -> List[tuple[Document, float]]:
         """
-        Rerank documents and return top-k by relevance.
+        Rerank documents and return top-k most relevant results.
+
+        Scores all documents using the cross-encoder model and returns the top-k
+        results sorted by relevance score in descending order.
 
         Args:
-            query: The search query
-            documents: List of documents to rerank
-            top_k: Number of top documents to return
+            query: The search query string
+            documents: List of LangChain Document objects to rerank
+            top_k: Maximum number of documents to return (actual may be less if insufficient documents)
 
         Returns:
-            Top-k documents with scores, sorted by relevance
+            List of (Document, score) tuples for top-k results sorted by score descending.
+            Returns fewer than top_k documents if input has fewer than top_k documents.
+
+        Examples:
+            >>> query = "What is machine learning?"
+            >>> reranked = reranker.rerank(query, documents, top_k=4)
+            >>> for doc, score in reranked:
+            ...     print(f"Score: {score:.4f}, Source: {doc.metadata['source']}")
         """
         scored = self.score_documents(query, documents)
 
@@ -224,7 +250,18 @@ class CustomAgentState(TypedDict):
 # ============================================================================
 
 class SimplePostgresVectorStore:
-    """Simple wrapper for PostgreSQL vector similarity search"""
+    """
+    PostgreSQL-based vector store for semantic and hybrid document search.
+
+    Combines vector similarity search (768-dimensional embeddings) with full-text
+    search using Reciprocal Rank Fusion (RRF) for improved retrieval quality.
+
+    Attributes:
+        embeddings: OllamaEmbeddings instance for generating query embeddings
+        collection_id: PostgreSQL collection ID for document filtering
+        pool: ConnectionPool for database connections (max_size=20)
+        database_url: PostgreSQL connection string (optional, for compatibility)
+    """
 
     def __init__(
         self,
@@ -260,7 +297,22 @@ class SimplePostgresVectorStore:
         )
 
     def similarity_search(self, query: str, k: int = 4) -> List[Document]:
-        """Search for similar document chunks"""
+        """
+        Search for document chunks similar to the query using vector embeddings.
+
+        Generates a query embedding and finds the k most similar document chunks
+        from the PostgreSQL vector store using cosine distance metric.
+
+        Args:
+            query: The search query string
+            k: Number of similar documents to return (default: 4)
+
+        Returns:
+            List of k most similar LangChain Document objects with metadata
+
+        Raises:
+            Exception: If embedding generation or database query fails
+        """
         try:
             # Generate query embedding
             query_embedding: List[float] = self.embeddings.embed_query(query)
