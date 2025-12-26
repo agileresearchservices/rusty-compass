@@ -43,10 +43,44 @@ def test_search_methods():
     print("✓ Components initialized")
 
     test_queries = [
-        ("machine learning algorithms", "Keyword-heavy query"),
-        ("what is supervised learning", "Semantic/conceptual query"),
-        ("Python Flask framework", "Mixed query"),
-        ("neural network training process", "Technical query"),
+        # ===== Semantic/Conceptual Queries (0.0-0.3) =====
+        ("What is machine learning?", "Semantic/conceptual"),
+        ("Explain how neural networks learn", "Conceptual/educational"),
+        ("What is the difference between supervised and unsupervised learning?", "Conceptual comparison"),
+        ("Describe the concept of overfitting in machine learning", "Conceptual explanation"),
+        ("What is object-oriented programming?", "Programming paradigm"),
+        ("Explain recursion in computer science", "Algorithm concept"),
+        ("How do I learn Python programming?", "Educational question"),
+        ("What are design patterns?", "Software design concept"),
+
+        # ===== Balanced Queries (0.3-0.6) =====
+        ("Python Flask REST API tutorial", "Balanced"),
+        ("Java Spring Boot microservices architecture", "Framework + pattern"),
+        ("React hooks best practices", "Framework + technique"),
+        ("PostgreSQL query optimization techniques", "Database + method"),
+        ("Docker containerization guide", "Tool + process"),
+        ("REST API design patterns", "Architecture + pattern"),
+        ("Vue.js framework comparison", "Framework discussion"),
+        ("Express.js middleware configuration", "Framework + concept"),
+
+        # ===== Lexical-Heavy Queries (0.6-0.8) =====
+        ("Django 4.2 authentication", "Version-specific"),
+        ("Python 3.11 new features", "Version-specific features"),
+        ("TensorFlow 2.13 API changes", "Library version updates"),
+        ("Kubernetes 1.28 installation guide", "Tool version documentation"),
+        ("Node.js version 20.5 release notes", "Runtime version info"),
+        ("AWS Lambda pricing model 2024", "Service + version year"),
+        ("MySQL 8.0 performance tuning", "Database version optimization"),
+
+        # ===== Pure Lexical/Specific Queries (0.8-1.0) =====
+        ("GPT-4 released in 2023", "Date + model number"),
+        ("Model XR-2500 specifications", "Part number"),
+        ("Intel Core i9-13900K specifications", "Product model specs"),
+        ("RTX 4090 release date 2022", "Product + date"),
+        ("SKU-XR-2500-A1 product manual", "Part number reference"),
+        ("iPhone 15 Pro Max camera specs", "Device model details"),
+        ("Google Pixel 8 Pro battery capacity mAh", "Device specs with unit"),
+        ("Model RTX-3080-Ti VRAM 12GB", "Product identifier + specs"),
     ]
 
     for query, description in test_queries:
