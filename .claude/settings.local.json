@@ -37,7 +37,8 @@
       "Bash(ollama pull:*)",
       "Bash(git rm:*)",
       "Bash(timeout 600 python:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(git push:*)"
     ]
   }
 }
