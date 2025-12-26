@@ -23,6 +23,7 @@ import warnings
 import time
 import json
 import logging
+import httpx
 import psycopg
 from pathlib import Path
 from typing import Sequence, Tuple, List, Optional, Dict, Any, Union, TypedDict, Annotated
@@ -553,6 +554,7 @@ class LangChainAgent:
         self.thread_id = None
         self.tools = []  # Will be populated in create_agent_graph
         self.retriever = None  # Base retriever
+        self.reranker = None  # Cross-encoder reranker
         self.compression_retriever = None  # LangChain compression retriever with reranking
 
     def verify_prerequisites(self):
