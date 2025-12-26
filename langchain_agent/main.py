@@ -28,10 +28,10 @@ from typing import Sequence, Tuple, List, Optional, Dict, Any, Union, TypedDict,
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.prebuilt import create_react_agent
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, END, add_messages
 from psycopg_pool import ConnectionPool
 from langchain_core.tools import tool
-from langchain_core.messages import SystemMessage, BaseMessage, AIMessage, HumanMessage, add_messages, ToolMessage
+from langchain_core.messages import SystemMessage, BaseMessage, AIMessage, HumanMessage, ToolMessage
 from langchain_core.documents import Document
 import httpx
 
