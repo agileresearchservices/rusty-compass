@@ -130,7 +130,7 @@ RETRIEVER_K = 4
 # Number of documents to fetch before filtering (for hybrid search)
 RETRIEVER_FETCH_K = 20
 
-# Lambda multiplier for hybrid search (0.0 = pure dense, 1.0 = pure lexical)
+# Lambda multiplier for hybrid search (0.0 = pure lexical, 1.0 = pure semantic/dense)
 RETRIEVER_LAMBDA_MULT = 0.25
 
 # Default search type: "similarity" (vector-only) or "hybrid" (vector + lexical using RRF)

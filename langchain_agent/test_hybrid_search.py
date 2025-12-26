@@ -42,37 +42,9 @@ def test_search_methods():
 
     print("✓ Components initialized")
 
+    # Lambda interpretation: 0.0=pure lexical, 1.0=pure semantic
     test_queries = [
-        # ===== Semantic/Conceptual Queries (0.0-0.3) =====
-        ("What is machine learning?", "Semantic/conceptual"),
-        ("Explain how neural networks learn", "Conceptual/educational"),
-        ("What is the difference between supervised and unsupervised learning?", "Conceptual comparison"),
-        ("Describe the concept of overfitting in machine learning", "Conceptual explanation"),
-        ("What is object-oriented programming?", "Programming paradigm"),
-        ("Explain recursion in computer science", "Algorithm concept"),
-        ("How do I learn Python programming?", "Educational question"),
-        ("What are design patterns?", "Software design concept"),
-
-        # ===== Balanced Queries (0.3-0.6) =====
-        ("Python Flask REST API tutorial", "Balanced"),
-        ("Java Spring Boot microservices architecture", "Framework + pattern"),
-        ("React hooks best practices", "Framework + technique"),
-        ("PostgreSQL query optimization techniques", "Database + method"),
-        ("Docker containerization guide", "Tool + process"),
-        ("REST API design patterns", "Architecture + pattern"),
-        ("Vue.js framework comparison", "Framework discussion"),
-        ("Express.js middleware configuration", "Framework + concept"),
-
-        # ===== Lexical-Heavy Queries (0.6-0.8) =====
-        ("Django 4.2 authentication", "Version-specific"),
-        ("Python 3.11 new features", "Version-specific features"),
-        ("TensorFlow 2.13 API changes", "Library version updates"),
-        ("Kubernetes 1.28 installation guide", "Tool version documentation"),
-        ("Node.js version 20.5 release notes", "Runtime version info"),
-        ("AWS Lambda pricing model 2024", "Service + version year"),
-        ("MySQL 8.0 performance tuning", "Database version optimization"),
-
-        # ===== Pure Lexical/Specific Queries (0.8-1.0) =====
+        # ===== Pure Lexical Queries (0.0-0.2) =====
         ("GPT-4 released in 2023", "Date + model number"),
         ("Model XR-2500 specifications", "Part number"),
         ("Intel Core i9-13900K specifications", "Product model specs"),
@@ -81,6 +53,37 @@ def test_search_methods():
         ("iPhone 15 Pro Max camera specs", "Device model details"),
         ("Google Pixel 8 Pro battery capacity mAh", "Device specs with unit"),
         ("Model RTX-3080-Ti VRAM 12GB", "Product identifier + specs"),
+
+        # ===== Lexical-Heavy Queries (0.2-0.4) =====
+        ("Django 4.2 authentication", "Version-specific"),
+        ("Python 3.11 new features", "Version-specific features"),
+        ("TensorFlow 2.13 API changes", "Library version updates"),
+        ("Kubernetes 1.28 installation guide", "Tool version documentation"),
+        ("Node.js version 20.5 release notes", "Runtime version info"),
+        ("AWS Lambda pricing model 2024", "Service + date identifier"),
+
+        # ===== Balanced Queries (0.4-0.6) =====
+        ("MySQL 8.0 performance tuning", "Database version + optimization"),
+        ("Python Flask REST API tutorial", "Balanced"),
+        ("React hooks best practices", "Framework + technique"),
+        ("Docker containerization guide", "Tool + process"),
+        ("Express.js middleware configuration", "Framework + concept"),
+
+        # ===== Semantic-Heavy Queries (0.6-0.9) =====
+        ("Java Spring Boot microservices architecture", "Framework + architecture"),
+        ("PostgreSQL query optimization techniques", "Database + method"),
+        ("REST API design patterns", "Architecture + pattern"),
+        ("Vue.js framework comparison", "Framework discussion"),
+
+        # ===== Pure Semantic Queries (0.8-1.0) =====
+        ("What is machine learning?", "Semantic/conceptual"),
+        ("Explain how neural networks learn", "Conceptual/educational"),
+        ("What is the difference between supervised and unsupervised learning?", "Conceptual comparison"),
+        ("Describe the concept of overfitting in machine learning", "Conceptual explanation"),
+        ("What is object-oriented programming?", "Programming paradigm"),
+        ("Explain recursion in computer science", "Algorithm concept"),
+        ("How do I learn Python programming?", "Educational question"),
+        ("What are design patterns?", "Software design concept"),
     ]
 
     for query, description in test_queries:
@@ -137,10 +140,10 @@ def test_search_methods():
     print(f"\n{'='*70}")
     print("Performance Summary:")
     print(f"{'='*70}")
-    print(f"Vector search (lambda=0.0): Semantic matching with embeddings")
-    print(f"Balanced hybrid (lambda=0.5): Equal weight to semantic and lexical")
-    print(f"Config hybrid (lambda={RETRIEVER_LAMBDA_MULT}): {int(RETRIEVER_LAMBDA_MULT*100)}% lexical, {int((1-RETRIEVER_LAMBDA_MULT)*100)}% semantic")
-    print(f"Text search (lambda=1.0): Full-text search only")
+    print(f"Text search (lambda=0.0): Full-text/lexical search only")
+    print(f"Balanced hybrid (lambda=0.5): Equal weight to lexical and semantic")
+    print(f"Config hybrid (lambda={RETRIEVER_LAMBDA_MULT}): {int((1-RETRIEVER_LAMBDA_MULT)*100)}% lexical, {int(RETRIEVER_LAMBDA_MULT*100)}% semantic")
+    print(f"Vector search (lambda=1.0): Semantic/dense matching with embeddings")
 
     pool.close()
     print(f"\n{'='*70}")
