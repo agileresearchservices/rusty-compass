@@ -36,7 +36,8 @@
       "Bash(cat:*)",
       "Bash(ollama pull:*)",
       "Bash(git rm:*)",
-      "Bash(timeout 600 python:*)"
+      "Bash(timeout 600 python:*)",
+      "Bash(wc:*)"
     ]
   }
 }

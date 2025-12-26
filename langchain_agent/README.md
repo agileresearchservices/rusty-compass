@@ -104,46 +104,67 @@ All conversations are automatically saved to PostgreSQL. You can:
 
 ## Quick Start
 
-### Step 1: Initialize the Database
-Run this once to create the necessary tables in PostgreSQL:
+### Prerequisites
+Before running setup, ensure:
+1. **Docker & PostgreSQL**: Running PostgreSQL container (from parent directory)
+   ```bash
+   docker compose up -d
+   ```
+
+2. **Ollama**: Running Ollama service (starts your LLM, embeddings, and reranker models)
+   ```bash
+   ollama serve
+   ```
+
+### Complete Setup (One Command)
+Run the unified setup script to initialize everything:
 
 ```bash
-python setup_db.py
+python setup.py
 ```
+
+This handles:
+- ✅ PostgreSQL database creation
+- ✅ Vector extension setup (PGVector)
+- ✅ Database tables & indexes (IVFFlat vector, GIN full-text)
+- ✅ Conversation memory tables (checkpoints)
+- ✅ Pulling Ollama models (LLM, embeddings, reranker)
+- ✅ Loading sample documents with embeddings
+- ✅ Creating vector embeddings for semantic search
+- ✅ Building full-text search indexes
 
 Expected output:
 ```
-✓ Database 'langchain_agent' created successfully
-✓ Connected to: PostgreSQL 16.x
-✓ Checkpoint tables initialized successfully
-✓ Database setup complete!
+======================================================================
+LANGCHAIN AGENT - COMPLETE SETUP
+======================================================================
+
+[1/7] Creating database...
+      ✓ Database 'langchain_agent' created
+      ✓ Connected to: PostgreSQL 16.x
+[2/7] Enabling PGVector extension...
+      ✓ PGVector extension enabled
+[3/7] Creating database tables...
+      ✓ Database tables created
+[4/7] Creating database indexes...
+      ✓ Indexes created (IVFFlat vector, GIN full-text)
+[5/7] Setting up Ollama models...
+      ✓ gpt-oss:20b pulled successfully
+      ✓ nomic-embed-text:latest pulled successfully
+      ✓ Qwen/Qwen3-Reranker-8B pulled successfully
+[6/7] Loading sample documents...
+      ✓ Loaded: python_basics.txt
+      ✓ Documents: 3
+      ✓ Chunks: 11
+      ✓ Chunks with embeddings: 11
+[7/7] Verifying setup...
+      ✓ Setup complete!
+
+You can now run the agent:
+  python main.py
 ```
 
-### Step 2: Load Sample Data
-Populate PostgreSQL vector store with sample documents (automatically chunked for semantic search):
-
-```bash
-python load_sample_data_pgvector.py
-```
-
-Expected output:
-```
-✓ Loaded: python_basics.txt (2055 chars)
-✓ Loaded: machine_learning_intro.txt (2680 chars)
-✓ Loaded: web_development.txt (3150 chars)
-
-✓ Loaded 3 documents
-Processing documents with chunking (1000 chars, 200 char overlap)...
-
-✓ Successfully loaded 11 total chunks into PostgreSQL
-✓ Documents in database: 3
-✓ Chunks in database: 11
-✓ Chunks with embeddings: 11
-
-✓ Data loading complete!
-```
-
-### Step 3: Start the Agent
+### Start the Agent
 Run the interactive agent:
 
 ```bash
@@ -298,22 +319,21 @@ Try these to test the agent's knowledge retrieval:
 
 ```
 langchain_agent/
-├── main.py                         # Main agent entry point & Qwen3Reranker class
-├── config.py                       # Configuration constants (includes reranker config)
-├── setup_db.py                     # Database initialization script
-├── load_sample_data_pgvector.py   # PostgreSQL data loader with document chunking
-├── test_reranker.py                # Cross-encoder reranker test suite
-├── test_hybrid_search.py           # Hybrid search & dynamic lambda testing
-├── test_query_evaluator.py         # Query evaluation & lambda adjustment testing
-├── requirements.txt                # Python dependencies
-└── README.md                       # This file
+├── main.py                    # Main agent entry point with Qwen3Reranker
+├── setup.py                   # Unified setup script (one command setup)
+├── config.py                  # Configuration constants
+├── requirements.txt           # Python dependencies
+├── test_reranker.py           # Cross-encoder reranker tests (6 comprehensive tests)
+├── test_hybrid_search.py      # Hybrid search strategy validation
+├── test_query_evaluator.py    # Query evaluation & dynamic lambda testing
+└── README.md                  # This file
 
 ../
-├── sample_docs/                    # Sample documents for knowledge base
+├── sample_docs/               # Sample documents for knowledge base
 │   ├── python_basics.txt
 │   ├── machine_learning_intro.txt
 │   └── web_development.txt
-└── docker-compose.yml              # PostgreSQL Docker setup (with PGVector)
+└── docker-compose.yml         # PostgreSQL + PGVector Docker setup
 ```
 
 ## Configuration
