@@ -39,6 +39,10 @@ __all__ = [
     "AGENT_MODEL",
     "REASONING_ENABLED",
     "REASONING_EFFORT",
+    # Query evaluation configuration
+    "ENABLE_QUERY_EVALUATION",
+    "DEFAULT_LAMBDA_MULT",
+    "QUERY_EVAL_TIMEOUT_MS",
     # Project paths
     "BASE_DIR",
     "SAMPLE_DOCS_DIR",
@@ -130,7 +134,20 @@ RETRIEVER_FETCH_K = 20
 RETRIEVER_LAMBDA_MULT = 0.25
 
 # Default search type: "similarity" (vector-only) or "hybrid" (vector + lexical using RRF)
-RETRIEVER_SEARCH_TYPE = "similarity"
+RETRIEVER_SEARCH_TYPE = "hybrid"
+
+# ============================================================================
+# QUERY EVALUATOR CONFIGURATION
+# ============================================================================
+
+# Enable intelligent query evaluation for dynamic lambda_mult adjustment
+ENABLE_QUERY_EVALUATION = True
+
+# Default lambda_mult when evaluation is disabled or fails
+DEFAULT_LAMBDA_MULT = 0.25
+
+# Query evaluation timeout (milliseconds) - max time to wait for LLM evaluation
+QUERY_EVAL_TIMEOUT_MS = 3000  # 3 seconds max for LLM evaluation
 
 # ============================================================================
 # AGENT CONFIGURATION
@@ -143,7 +160,7 @@ RETRIEVER_TOOL_DESCRIPTION = "Search for information in the local document index
 # Agent settings
 AGENT_MODEL = LLM_MODEL
 REASONING_ENABLED = True
-REASONING_EFFORT = "medium"  # Options: "low", "medium", "high"
+REASONING_EFFORT = "low"  # Options: "low", "medium", "high"
 
 # ============================================================================
 # PROJECT PATHS
