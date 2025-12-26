@@ -414,16 +414,15 @@ def load_sample_data():
 
                         # Insert chunks with pre-generated embeddings
                         for chunk_idx, (chunk, embedding) in enumerate(zip(chunk_list, chunk_embeddings)):
-                            try:
-                                embedding_str = "[" + ",".join(str(float(e)) for e in embedding) + "]"
-                                cur.execute(
-                                    """
-                                    INSERT INTO document_chunks (document_id, chunk_index, content, embedding)
-                                    VALUES (%s, %s, %s, %s)
-                                    """,
-                                    (doc_id, chunk_idx, chunk, embedding_str)
-                                )
-                                total_chunks += 1
+                            embedding_str = "[" + ",".join(str(float(e)) for e in embedding) + "]"
+                            cur.execute(
+                                """
+                                INSERT INTO document_chunks (document_id, chunk_index, content, embedding)
+                                VALUES (%s, %s, %s, %s)
+                                """,
+                                (doc_id, chunk_idx, chunk, embedding_str)
+                            )
+                            total_chunks += 1
 
                     except Exception as e:
                         # Fallback to sequential embedding if batch fails
