@@ -23,6 +23,15 @@ __all__ = [
     "DATABASE_URL",
     "DB_CONNECTION_KWARGS",
     "DB_POOL_MAX_SIZE",
+    # PGVector configuration
+    "VECTOR_DIMENSION",
+    "VECTOR_INDEX_TYPE",
+    "VECTOR_SIMILARITY_METRIC",
+    "VECTOR_COLLECTION_NAME",
+    # Retriever configuration
+    "RETRIEVER_K",
+    "RETRIEVER_FETCH_K",
+    "RETRIEVER_LAMBDA_MULT",
     # Agent configuration
     "RETRIEVER_TOOL_NAME",
     "RETRIEVER_TOOL_DESCRIPTION",
@@ -88,6 +97,36 @@ DB_CONNECTION_KWARGS = {
     "row_factory": dict_row,  # Required for PostgresSaver
 }
 DB_POOL_MAX_SIZE = 20
+
+# ============================================================================
+# PGVECTOR CONFIGURATION
+# ============================================================================
+
+# Vector embedding dimension (nomic-embed-text produces 768-dimensional vectors)
+VECTOR_DIMENSION = 768
+
+# Vector index type: "ivfflat" (faster queries, slower indexing) or "hnsw" (slower queries, faster updates)
+# Use IVFFlat for static knowledge bases where query speed is priority
+VECTOR_INDEX_TYPE = "ivfflat"
+
+# Vector similarity metric: "cosine", "l2", or "inner_product"
+VECTOR_SIMILARITY_METRIC = "cosine"
+
+# Collection name for vector storage (same as ChromaDB for migration compatibility)
+VECTOR_COLLECTION_NAME = "local_knowledge"
+
+# ============================================================================
+# RETRIEVER CONFIGURATION
+# ============================================================================
+
+# Number of documents to retrieve from vector store
+RETRIEVER_K = 4
+
+# Number of documents to fetch before filtering (for hybrid search)
+RETRIEVER_FETCH_K = 20
+
+# Lambda multiplier for hybrid search (0.0 = pure dense, 1.0 = pure lexical)
+RETRIEVER_LAMBDA_MULT = 0.25
 
 # ============================================================================
 # AGENT CONFIGURATION

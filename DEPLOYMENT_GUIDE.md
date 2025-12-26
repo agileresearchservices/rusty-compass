@@ -4,7 +4,7 @@
 
 This is a production-ready, fully local LangChain agent with real-time streaming capabilities. The agent combines:
 - **Intelligent Reasoning**: Streams thinking process character-by-character
-- **Semantic Search**: Local knowledge base with ChromaDB
+- **Semantic Search**: Local knowledge base with PostgreSQL + PGVector
 - **Persistent Memory**: PostgreSQL conversation history
 - **Local Execution**: No external API calls or dependencies
 
@@ -14,31 +14,31 @@ This is a production-ready, fully local LangChain agent with real-time streaming
 |-----------|-----------|---------|---------|
 | **LLM** | Ollama + gpt-oss:20b | Latest | Core reasoning engine |
 | **Embeddings** | Ollama + nomic-embed-text | Latest | Vector embeddings for semantic search |
-| **Vector Store** | ChromaDB | 1.4.0+ | Local knowledge base storage |
+| **Vector Store** | PostgreSQL + PGVector | 16+ | Local knowledge base with vector indexing |
 | **Memory** | PostgreSQL | 16+ | Persistent conversation state |
 | **Agent Framework** | LangGraph | 1.0+ | Agent orchestration & streaming |
+| **Vector Database** | pgvector | 0.3.0+ | PostgreSQL vector extension |
 | **CLI Language** | Python | 3.9+ | Application runtime |
 
 ## Directory Structure
 
 ```
 /Users/kevin/Downloads/
-├── langchain_agent/                    # Main application
-│   ├── main.py                        # Agent entry point with streaming
-│   ├── config.py                      # Configuration constants
-│   ├── setup_db.py                   # Database initialization
-│   ├── load_sample_data.py           # ChromaDB data loader
-│   ├── requirements.txt              # Python dependencies
-│   └── README.md                     # User documentation
+├── langchain_agent/                         # Main application
+│   ├── main.py                             # Agent entry point with streaming
+│   ├── config.py                           # Configuration constants
+│   ├── setup_db.py                         # Database initialization
+│   ├── load_sample_data_pgvector.py       # PostgreSQL data loader with chunking
+│   ├── requirements.txt                    # Python dependencies
+│   └── README.md                           # User documentation
 │
-├── sample_docs/                       # Knowledge base documents
-│   ├── python_basics.txt             # Python programming guide
-│   ├── machine_learning_intro.txt    # ML concepts
-│   └── web_development.txt           # Web dev fundamentals
+├── sample_docs/                            # Knowledge base documents
+│   ├── python_basics.txt                  # Python programming guide
+│   ├── machine_learning_intro.txt         # ML concepts
+│   └── web_development.txt                # Web dev fundamentals
 │
-├── chroma_db/                         # ChromaDB persistence (auto-created)
-├── docker-compose.yml                # PostgreSQL Docker setup
-└── postgres-credentials.md            # Database credentials
+├── docker-compose.yml                      # PostgreSQL + PGVector Docker setup
+└── postgres-credentials.md                 # Database credentials
 ```
 
 ## Installation & Setup
@@ -73,9 +73,9 @@ This is a production-ready, fully local LangChain agent with real-time streaming
    python setup_db.py
    ```
 
-5. **Load Sample Data**
+5. **Load Sample Data into PostgreSQL Vector Store**
    ```bash
-   python load_sample_data.py
+   python load_sample_data_pgvector.py
    ```
 
 6. **Run Agent**
@@ -174,7 +174,8 @@ Save to PostgreSQL
 |-----------|------|-------|
 | First query | 15-30s | Model loading + embedding generation |
 | Subsequent queries | 2-5s | Typical for knowledge retrieval + reasoning |
-| Vector search | <100ms | ChromaDB local search |
+| Vector search | <100ms | PostgreSQL + PGVector IVFFlat index |
+| Embedding generation | 50-200ms | Per-document embedding generation |
 | Memory save | <50ms | PostgreSQL persistence |
 
 ## Troubleshooting
@@ -185,8 +186,8 @@ Save to PostgreSQL
 - Verify Postgres: `docker compose ps`
 
 ### No response generated
-- Ensure sample data loaded: `python load_sample_data.py`
-- Check ChromaDB: `ls -la chroma_db/`
+- Ensure sample data loaded: `python load_sample_data_pgvector.py`
+- Check vector store has documents: `python -c "import psycopg; print(psycopg.connect(...).execute('SELECT COUNT(*) FROM documents'))"`
 
 ### Database errors
 - Reinitialize: `python setup_db.py`
@@ -241,9 +242,9 @@ LLM_MODEL = "llama2:13b"       # Different model
 ```
 
 ### Custom Knowledge Base
-1. Replace sample documents
-2. Run `python load_sample_data.py`
-3. Agent reloads knowledge immediately
+1. Replace sample documents in `../sample_docs/`
+2. Run `python load_sample_data_pgvector.py`
+3. Agent reloads knowledge immediately from PostgreSQL vector store
 
 ## Maintenance
 
@@ -269,17 +270,26 @@ pip install --upgrade -r requirements.txt
 
 ## Performance Optimization
 
-### For Slower Systems
+### For Vector Search Performance
 ```python
 # config.py
-LLM_TEMPERATURE = 0.1          # Faster/more deterministic
-CHROMA_DB_PATH = "./chroma_db" # Keep persistent cache
+VECTOR_INDEX_TYPE = "ivfflat"  # Faster queries (default, good for static data)
+VECTOR_SIMILARITY_METRIC = "cosine"  # Standard metric
+RETRIEVER_K = 4                # Retrieve top 4 documents
+RETRIEVER_FETCH_K = 20         # Fetch 20 before filtering
 ```
 
-### For Faster Responses
+### For Faster LLM Responses
 ```python
 # config.py - use smaller model
 LLM_MODEL = "neural-chat:7b"
+LLM_TEMPERATURE = 0.1          # More deterministic
+```
+
+### For Real-Time Data Updates
+```python
+# config.py - use HNSW instead of IVFFlat for frequent insertions
+VECTOR_INDEX_TYPE = "hnsw"     # Better for real-time updates
 ```
 
 ## File Descriptions
@@ -288,8 +298,10 @@ LLM_MODEL = "neural-chat:7b"
 |------|---------|
 | `main.py` | Core agent with streaming logic |
 | `config.py` | All configuration constants |
-| `setup_db.py` | Database initialization script |
-| `load_sample_data.py` | ChromaDB population script |
+| `setup_db.py` | Database initialization script (creates tables, enables PGVector) |
+| `load_sample_data.py` | Legacy ChromaDB population script (deprecated) |
+| `load_sample_data_pgvector.py` | PostgreSQL vector store population script (use this) |
+| `migrate_data.py` | Migration script from ChromaDB to PostgreSQL |
 | `requirements.txt` | Python package dependencies |
 | `README.md` | User-facing documentation |
 
@@ -297,8 +309,10 @@ LLM_MODEL = "neural-chat:7b"
 
 - **LangChain**: 1.2.0+
 - **LangGraph**: 1.0.5+
-- **ChromaDB**: 1.4.0+
-- **PostgreSQL**: 16+
+- **langchain-postgres**: 0.1.0+
+- **pgvector**: 0.3.0+
+- **SQLAlchemy**: 2.0.0+
+- **PostgreSQL**: 16+ (with PGVector extension)
 - **Python**: 3.9+
 
 ## Support & Troubleshooting

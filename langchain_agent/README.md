@@ -2,7 +2,7 @@
 
 A fully local, production-grade LangGraph ReAct agent powered by:
 - **LLM**: Ollama running `gpt-oss:20b`
-- **Vector Store**: ChromaDB for semantic knowledge retrieval
+- **Vector Store**: PostgreSQL with PGVector for semantic knowledge retrieval
 - **Memory**: PostgreSQL for persistent conversation history
 - **Embeddings**: Ollama `nomic-embed-text:latest`
 - **Real-time Streaming**: Character-by-character streaming of agent thinking and final responses
@@ -100,20 +100,26 @@ Expected output:
 ```
 
 ### Step 2: Load Sample Data
-Populate ChromaDB with sample documents:
+Populate PostgreSQL vector store with sample documents (automatically chunked for semantic search):
 
 ```bash
-python load_sample_data.py
+python load_sample_data_pgvector.py
 ```
 
 Expected output:
 ```
-✓ Loaded: python_basics.txt (1234 chars)
-✓ Loaded: machine_learning_intro.txt (5678 chars)
-✓ Loaded: web_development.txt (9012 chars)
-✓ Created vector store at: ./chroma_db
-✓ Testing retrieval with query: 'Python'
-✓ Found 2 relevant documents
+✓ Loaded: python_basics.txt (2055 chars)
+✓ Loaded: machine_learning_intro.txt (2680 chars)
+✓ Loaded: web_development.txt (3150 chars)
+
+✓ Loaded 3 documents
+Processing documents with chunking (1000 chars, 200 char overlap)...
+
+✓ Successfully loaded 11 total chunks into PostgreSQL
+✓ Documents in database: 3
+✓ Chunks in database: 11
+✓ Chunks with embeddings: 11
+
 ✓ Data loading complete!
 ```
 
@@ -245,7 +251,8 @@ Try these to test the agent's knowledge retrieval:
          ▼                       ▼
 ┌──────────────────┐   ┌─────────────────────┐
 │ Knowledge Base   │   │   Conversation      │
-│ (ChromaDB)       │   │   Memory (Postgres) │
+│ (PostgreSQL +    │   │   Memory (Postgres) │
+│  PGVector)       │   │                     │
 │                  │   │                     │
 │ • Documents      │   │ • Chat History      │
 │ • Embeddings     │   │ • State/Context     │
@@ -257,29 +264,28 @@ Try these to test the agent's knowledge retrieval:
 
 1. **User Query** → Agent receives input
 2. **Reasoning** → LLM decides if retrieval is needed
-3. **Optional Retrieval** → ChromaDB searches knowledge base using embeddings
+3. **Optional Retrieval** → PostgreSQL with PGVector searches knowledge base using embeddings
 4. **Response Generation** → LLM generates response
-5. **Memory Storage** → Conversation state saved to Postgres
+5. **Memory Storage** → Conversation state saved to PostgreSQL
 6. **Output** → Response sent to user
 
 ## File Structure
 
 ```
 langchain_agent/
-├── main.py                    # Main agent entry point
-├── config.py                  # Configuration constants
-├── setup_db.py               # Database initialization script
-├── load_sample_data.py       # Sample data loader
-├── requirements.txt          # Python dependencies
-└── README.md                 # This file
+├── main.py                         # Main agent entry point
+├── config.py                       # Configuration constants
+├── setup_db.py                     # Database initialization script
+├── load_sample_data_pgvector.py   # PostgreSQL data loader with document chunking
+├── requirements.txt                # Python dependencies
+└── README.md                       # This file
 
 ../
-├── sample_docs/              # Sample documents for knowledge base
+├── sample_docs/                    # Sample documents for knowledge base
 │   ├── python_basics.txt
 │   ├── machine_learning_intro.txt
 │   └── web_development.txt
-├── chroma_db/                # ChromaDB persistence (auto-created)
-└── docker-compose.yml        # PostgreSQL Docker setup
+└── docker-compose.yml              # PostgreSQL Docker setup (with PGVector)
 ```
 
 ## Configuration
@@ -299,8 +305,16 @@ Edit `config.py` to customize:
 
 ### Storage & Connection
 - **POSTGRES_HOST/PORT**: Database connection settings
-- **CHROMA_DB_PATH**: Vector store location
+- **VECTOR_COLLECTION_NAME**: PostgreSQL vector collection name (default: `local_knowledge`)
+- **VECTOR_DIMENSION**: Embedding vector dimension (default: 768 for nomic-embed-text)
+- **VECTOR_INDEX_TYPE**: Index strategy - `ivfflat` (faster queries) or `hnsw` (faster updates)
+- **VECTOR_SIMILARITY_METRIC**: Similarity metric - `cosine`, `l2`, or `inner_product`
 - **OLLAMA_BASE_URL**: Ollama endpoint URL
+
+### Retriever Configuration
+- **RETRIEVER_K**: Number of documents to retrieve per query (default: 4)
+- **RETRIEVER_FETCH_K**: Number of documents to fetch before filtering (default: 20)
+- **RETRIEVER_LAMBDA_MULT**: Hybrid search weight for vector vs keyword search (default: 0.25)
 
 ### Advanced Features
 - **ENABLE_COMPACTION**: Auto-compress long conversations (default: `True`)
@@ -310,10 +324,25 @@ Edit `config.py` to customize:
 ## Adding Custom Documents
 
 1. Add `.txt` files to the `../sample_docs/` directory
-2. Run: `python load_sample_data.py`
-3. The agent will now have access to your documents
+2. Run: `python load_sample_data_pgvector.py`
+3. The agent will now have access to your documents in the PostgreSQL vector store
 
 Documents should be plain text files with clear, informative content. The agent uses semantic search, so well-written documents with good structure work best.
+
+### Document Chunking Strategy
+
+The data loader automatically chunks documents for improved semantic search accuracy:
+
+- **Chunk Size**: 1000 characters per chunk
+- **Overlap**: 200 characters between adjacent chunks (prevents losing context at boundaries)
+- **Storage**: Full documents stored in `documents` table; chunks with embeddings stored in `document_chunks` table
+- **Retrieval**: Similarity search queries the `document_chunks` table for precise, context-aware results
+
+This chunking approach ensures that:
+- Large documents are broken into semantically meaningful pieces
+- Context is preserved across chunk boundaries via overlap
+- Vector similarity search returns relevant chunks, not entire documents
+- Memory is efficiently used while maintaining semantic accuracy
 
 ## Troubleshooting
 
@@ -329,10 +358,16 @@ docker compose up -d
 psql -h localhost -U postgres -d postgres
 ```
 
-### "ChromaDB not initialized"
+### "Vector store has no documents"
 ```bash
-# Run the data loader
-python load_sample_data.py
+# Run the PostgreSQL data loader
+python load_sample_data_pgvector.py
+```
+
+### "PGVector extension not found"
+```bash
+# Initialize the database with PGVector support
+python setup_db.py
 ```
 
 ### "Ollama models not found"
@@ -346,7 +381,7 @@ ollama pull nomic-embed-text:latest
 ```
 
 ### "Agent responses are slow"
-This is normal on first run. ChromaDB creates embeddings, which takes time. Subsequent queries will be faster.
+This is normal on first run. The embedding model takes time to load and generate embeddings. Subsequent queries will be faster. Vector search with PGVector is typically 100-500ms for similarity search operations.
 
 ### "Port 5432 already in use"
 Change the port in docker-compose.yml and update config.py accordingly.
@@ -355,8 +390,10 @@ Change the port in docker-compose.yml and update config.py accordingly.
 
 - **First Query**: May take 15-30 seconds (model loading, embedding generation)
 - **Subsequent Queries**: 2-5 seconds typically
-- **Vector Search**: Uses cosine similarity for fast retrieval
-- **Conversation Memory**: All messages persisted to Postgres for multi-session continuity
+- **Vector Search**: PGVector with IVFFlat indexing provides sub-100ms similarity search for static knowledge bases
+- **Embedding Generation**: ~50-200ms per document depending on content length
+- **Conversation Memory**: All messages persisted to PostgreSQL for multi-session continuity
+- **Index Type Impact**: IVFFlat (used by default) optimizes read performance; HNSW available for frequent updates
 
 ## Persistence & Memory
 
