@@ -33,6 +33,13 @@ __all__ = [
     "RETRIEVER_FETCH_K",
     "RETRIEVER_LAMBDA_MULT",
     "RETRIEVER_SEARCH_TYPE",
+    # Reranker configuration
+    "ENABLE_RERANKING",
+    "RERANKER_MODEL",
+    "RERANKER_FETCH_K",
+    "RERANKER_TOP_K",
+    "RERANKER_TIMEOUT",
+    "RERANKER_BATCH_SIZE",
     # Agent configuration
     "RETRIEVER_TOOL_NAME",
     "RETRIEVER_TOOL_DESCRIPTION",
@@ -128,13 +135,36 @@ VECTOR_COLLECTION_NAME = "local_knowledge"
 RETRIEVER_K = 4
 
 # Number of documents to fetch before filtering (for hybrid search)
-RETRIEVER_FETCH_K = 20
+# Increased to 30 to provide more candidates for reranking
+RETRIEVER_FETCH_K = 30
 
 # Lambda multiplier for hybrid search (0.0 = pure lexical, 1.0 = pure semantic/dense)
 RETRIEVER_LAMBDA_MULT = 0.25
 
 # Default search type: "similarity" (vector-only) or "hybrid" (vector + lexical using RRF)
 RETRIEVER_SEARCH_TYPE = "hybrid"
+
+# ============================================================================
+# RERANKER CONFIGURATION
+# ============================================================================
+
+# Enable reranking of hybrid search results using cross-encoder model
+ENABLE_RERANKING = True
+
+# Reranker model from Ollama (cross-encoder for relevance scoring)
+RERANKER_MODEL = "dengcao/Qwen3-Reranker-8B:Q3_K_M"
+
+# Number of candidates to fetch before reranking
+RERANKER_FETCH_K = 15
+
+# Final number of documents to return after reranking
+RERANKER_TOP_K = 4
+
+# Reranker request timeout in seconds
+RERANKER_TIMEOUT = 30
+
+# Batch size for concurrent reranking requests (reserved for future optimization)
+RERANKER_BATCH_SIZE = 5
 
 # ============================================================================
 # QUERY EVALUATOR CONFIGURATION
