@@ -21,15 +21,17 @@ import sys
 import uuid
 import warnings
 import time
+import json
 import psycopg
 from pathlib import Path
-from typing import Sequence, Tuple, List, Optional, Dict, Any, Union
+from typing import Sequence, Tuple, List, Optional, Dict, Any, Union, TypedDict, Annotated
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.prebuilt import create_react_agent
+from langgraph.graph import StateGraph, END
 from psycopg_pool import ConnectionPool
 from langchain_core.tools import tool
-from langchain_core.messages import SystemMessage, BaseMessage, AIMessage, HumanMessage
+from langchain_core.messages import SystemMessage, BaseMessage, AIMessage, HumanMessage, add_messages, ToolMessage
 from langchain_core.documents import Document
 import httpx
 
@@ -53,6 +55,9 @@ from config import (
     RETRIEVER_FETCH_K,
     RETRIEVER_LAMBDA_MULT,
     RETRIEVER_SEARCH_TYPE,
+    ENABLE_QUERY_EVALUATION,
+    DEFAULT_LAMBDA_MULT,
+    QUERY_EVAL_TIMEOUT_MS,
     RETRIEVER_TOOL_NAME,
     RETRIEVER_TOOL_DESCRIPTION,
     OLLAMA_BASE_URL,
@@ -71,6 +76,26 @@ from config import (
     REASONING_EFFORT,
 )
 
+
+# ============================================================================
+# STATE SCHEMA FOR CUSTOM AGENT GRAPH
+# ============================================================================
+
+class CustomAgentState(TypedDict):
+    """
+    State schema for custom agent graph with dynamic lambda_mult.
+
+    This extends the default agent state to include query analysis
+    and dynamic search parameter adjustment.
+    """
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+    lambda_mult: float
+    query_analysis: str
+
+
+# ============================================================================
+# VECTOR STORE AND RETRIEVER
+# ============================================================================
 
 class SimplePostgresVectorStore:
     """Simple wrapper for PostgreSQL vector similarity search"""
@@ -401,6 +426,7 @@ class LangChainAgent:
         self.checkpointer = None
         self.app = None
         self.thread_id = None
+        self.tools = []  # Will be populated in create_agent_graph
 
     def verify_prerequisites(self):
         """Verify that all required services are running"""
@@ -526,20 +552,176 @@ class LangChainAgent:
 
         print()
 
+    # ========================================================================
+    # AGENT GRAPH NODES FOR DYNAMIC QUERY EVALUATION
+    # ========================================================================
+
+    def query_evaluator_node(self, state: CustomAgentState) -> Dict[str, Any]:
+        """
+        Evaluate the query type and determine optimal lambda_mult for hybrid search.
+
+        Lambda interpretation:
+        - 0.0-0.2: Pure semantic (conceptual questions, "what is", "explain")
+        - 0.3-0.5: Balanced (mixed queries, "Python Flask tutorial")
+        - 0.6-0.8: Lexical-heavy (specific terms, brands, versions)
+        - 0.9-1.0: Pure lexical (dates, model numbers, part numbers)
+        """
+        messages = state["messages"]
+
+        # Extract last user message
+        last_user_msg = None
+        for msg in reversed(messages):
+            if isinstance(msg, HumanMessage):
+                last_user_msg = msg.content
+                break
+
+        if not last_user_msg:
+            # No user message, use default
+            return {"lambda_mult": 0.25, "query_analysis": "No query detected"}
+
+        # LLM evaluation prompt
+        evaluation_prompt = f"""Analyze this search query and determine the optimal search strategy by setting a lambda_mult value between 0.0 and 1.0.
+
+Query: "{last_user_msg}"
+
+Lambda_mult Guidelines:
+- 0.0-0.2: Pure SEMANTIC search
+  * Use for: conceptual questions, "what is", "explain", "how does", "why"
+  * Example: "What is machine learning?" → 0.1
+
+- 0.3-0.5: BALANCED hybrid search
+  * Use for: mixed queries with both concepts and specific terms
+  * Example: "Python Flask REST API tutorial" → 0.4
+
+- 0.6-0.8: LEXICAL-heavy search
+  * Use for: specific versions, brands, frameworks, proper nouns
+  * Example: "Django 4.2 authentication" → 0.7
+
+- 0.9-1.0: Pure LEXICAL search
+  * Use for: dates, model numbers, part numbers, exact identifiers
+  * Example: "GPT-4 released in 2023" → 0.95
+  * Example: "Model XR-2500 specifications" → 1.0
+
+Respond with ONLY a JSON object in this format:
+{{"lambda_mult": <float between 0.0 and 1.0>, "reasoning": "<brief explanation>"}}
+
+Example response:
+{{"lambda_mult": 0.15, "reasoning": "Conceptual question about machine learning requires semantic understanding"}}"""
+
+        try:
+            # Call LLM for evaluation
+            response = self.llm.invoke(evaluation_prompt)
+            result_text = response.content.strip()
+
+            # Parse JSON response
+            result = json.loads(result_text)
+
+            lambda_mult = float(result["lambda_mult"])
+            reasoning = result.get("reasoning", "No reasoning provided")
+
+            # Validate range
+            lambda_mult = max(0.0, min(1.0, lambda_mult))
+
+            # Log evaluation (optional for debugging)
+            print(f"[Query Evaluator] Lambda: {lambda_mult:.2f} | {reasoning}")
+
+            return {
+                "lambda_mult": lambda_mult,
+                "query_analysis": reasoning
+            }
+
+        except Exception as e:
+            # Fallback to default if evaluation fails
+            print(f"⚠ Query evaluation failed: {e}. Using default lambda=0.25")
+            return {
+                "lambda_mult": 0.25,
+                "query_analysis": f"Evaluation failed: {str(e)}"
+            }
+
+    def agent_node(self, state: CustomAgentState) -> Dict[str, Any]:
+        """
+        Agent reasoning node - calls LLM with tool binding.
+        """
+        messages = state["messages"]
+
+        # Bind tools to LLM
+        llm_with_tools = self.llm.bind_tools(self.tools)
+
+        # Call LLM
+        response = llm_with_tools.invoke(messages)
+
+        return {"messages": [response]}
+
+    def tools_node(self, state: CustomAgentState) -> Dict[str, Any]:
+        """
+        Execute tool calls with access to state (for dynamic lambda_mult).
+        """
+        messages = state["messages"]
+        last_message = messages[-1]
+
+        # Extract tool calls from last message
+        if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
+            return {"messages": []}
+
+        tool_responses = []
+        lambda_mult = state.get("lambda_mult", 0.25)
+
+        for tool_call in last_message.tool_calls:
+            tool_name = tool_call["name"]
+            tool_args = tool_call["args"]
+
+            if tool_name == "knowledge_base":
+                query = tool_args.get("query", "")
+
+                # Execute with dynamic lambda
+                retriever = self.vector_store.as_retriever(
+                    search_type="hybrid",
+                    search_kwargs={
+                        "k": RETRIEVER_K,
+                        "fetch_k": RETRIEVER_FETCH_K,
+                        "lambda_mult": lambda_mult
+                    }
+                )
+
+                results = retriever.invoke(query)
+                content = "\n\n".join([doc.page_content for doc in results]) if results else "No relevant information found."
+
+                # Create tool response message
+                tool_responses.append(
+                    ToolMessage(
+                        content=content,
+                        tool_call_id=tool_call["id"]
+                    )
+                )
+
+        return {"messages": tool_responses}
+
+    def should_continue(self, state: CustomAgentState) -> str:
+        """
+        Determine whether to continue to tools or end.
+        """
+        messages = state["messages"]
+        last_message = messages[-1]
+
+        # If LLM made tool calls, route to tools
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+            return "tools"
+
+        # Otherwise, end
+        return "END"
+
     def create_agent_graph(self):
-        """Create the ReAct agent graph with tools and memory"""
-        print("Creating agent graph...")
+        """Create custom StateGraph with query evaluation for dynamic lambda_mult"""
+        print("Creating custom agent graph with query evaluation...")
 
-        # Create the retriever tool
-        retriever = self.vector_store.as_retriever(search_type=RETRIEVER_SEARCH_TYPE)
-
+        # Define the knowledge_base tool schema
         @tool
         def knowledge_base(query: str) -> str:
             """Search for information in the local document knowledge base.
 
             Use this tool to find relevant information about Python programming,
             machine learning concepts, and web development topics stored in the
-            local document index using semantic search.
+            local document index.
 
             Args:
                 query: The search query to find relevant documents.
@@ -548,19 +730,40 @@ class LangChainAgent:
                 Relevant document content from the knowledge base, or a message
                 if no relevant documents are found.
             """
-            results = retriever.invoke(query)
-            if results:
-                return "\n\n".join([doc.page_content for doc in results])
-            return "No relevant information found."
+            # This is just a schema definition
+            # Actual execution happens in tools_node with dynamic lambda
+            pass
 
-        # Create the agent graph
-        self.app = create_react_agent(
-            model=self.llm,
-            tools=[knowledge_base],
-            checkpointer=self.checkpointer,
+        # Store tools list for the agent
+        self.tools = [knowledge_base]
+
+        # Build the graph
+        workflow = StateGraph(CustomAgentState)
+
+        # Add nodes
+        workflow.add_node("query_evaluator", self.query_evaluator_node)
+        workflow.add_node("agent", self.agent_node)
+        workflow.add_node("tools", self.tools_node)
+
+        # Set entry point
+        workflow.set_entry_point("query_evaluator")
+
+        # Add edges
+        workflow.add_edge("query_evaluator", "agent")
+        workflow.add_conditional_edges(
+            "agent",
+            self.should_continue,
+            {
+                "tools": "tools",
+                "END": END
+            }
         )
+        workflow.add_edge("tools", "agent")
 
-        print("✓ Agent graph created and compiled")
+        # Compile with checkpointer
+        self.app = workflow.compile(checkpointer=self.checkpointer)
+
+        print("✓ Custom agent graph created with query evaluator")
         print()
 
     def generate_thread_id(self):
@@ -857,8 +1060,12 @@ Summary:"""
             user_input: The user's question or command
         """
         try:
-            # Prepare input for the agent
-            input_data = {"messages": [("user", user_input)]}
+            # Prepare input for the agent with new state schema
+            input_data = {
+                "messages": [("user", user_input)],
+                "lambda_mult": 0.25,  # Default, will be overridden by query_evaluator
+                "query_analysis": ""
+            }
 
             # Try to apply compaction to conversation if needed
             try:
@@ -887,6 +1094,12 @@ Summary:"""
                 input_data,
                 config={"configurable": {"thread_id": self.thread_id}},
             )
+
+            # Log query analysis for debugging (optional)
+            if "query_analysis" in result and result["query_analysis"]:
+                print(f"[Debug] Query Analysis: {result['query_analysis']}")
+            if "lambda_mult" in result:
+                print(f"[Debug] Lambda used: {result.get('lambda_mult', 'N/A'):.2f}")
 
             # Extract final response and reasoning from result
             if "messages" in result:
