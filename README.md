@@ -19,16 +19,123 @@ A fully local LangChain agent that combines:
 
 ## Architecture
 
-```
-User Input
-    ↓
-LangGraph Agent (ReAct)
-    ├─→ Query Evaluator (classify query type)
-    ├─→ Hybrid Search (vector + full-text)
-    │   └─→ Qwen3-Reranker-8B (cross-encoder scoring)
-    └─→ LLM Response (gpt-oss:20b)
-    ↓
-PostgreSQL Memory (conversation history)
+```mermaid
+flowchart TB
+    subgraph User["User Interface"]
+        CLI[Command Line Interface]
+    end
+
+    subgraph Ollama["Ollama Server (localhost:11434)"]
+        direction TB
+        LLM["gpt-oss:20b<br/>(Reasoning LLM)"]
+        EMB["nomic-embed-text<br/>(768-dim Embeddings)"]
+        RERANK["Qwen3-Reranker-8B<br/>(Cross-Encoder)"]
+    end
+
+    subgraph PostgreSQL["PostgreSQL + PGVector"]
+        direction TB
+        subgraph Tables["Tables"]
+            DOCS[documents]
+            CHUNKS[document_chunks]
+            CONVOS[conversations]
+            CHECKPOINTS[checkpoints]
+        end
+        subgraph Indexes["Indexes"]
+            IVFFLAT["IVFFlat Vector Index<br/>(Cosine Distance)"]
+            TSVECTOR["Full-Text Index<br/>(tsvector/tsquery)"]
+        end
+    end
+
+    subgraph LangChainAgent["LangChainAgent (main.py)"]
+        direction TB
+
+        subgraph QueryEval["Query Evaluator"]
+            QE_CLASSIFY["Classify Query Type<br/>(fact_lookup, how_to,<br/>conceptual, conversational)"]
+            QE_LAMBDA["Adjust lambda_mult<br/>(0.2 - 0.9)"]
+        end
+
+        subgraph LangGraph["LangGraph ReAct Agent"]
+            STATE["CustomAgentState<br/>messages, lambda_mult,<br/>query_analysis"]
+            REACT["ReAct Loop<br/>(Reason, Act, Observe)"]
+            TOOLS["Tools"]
+            CHECKPOINT["PostgresSaver<br/>(Persistence)"]
+        end
+
+        subgraph KBTool["Knowledge Base Tool"]
+            direction LR
+            RETRIEVER["PostgresRetriever"]
+        end
+    end
+
+    subgraph SearchPipeline["Hybrid Search Pipeline"]
+        direction TB
+
+        subgraph VectorSearch["Vector Search"]
+            VS_EMBED["Generate Query<br/>Embedding"]
+            VS_QUERY["Cosine Distance<br/>Search"]
+        end
+
+        subgraph TextSearch["Full-Text Search"]
+            TS_PARSE["Parse to tsquery"]
+            TS_RANK["ts_rank_cd Scoring"]
+        end
+
+        RRF["RRF Fusion<br/>(k=60)"]
+        RERANKER["Qwen3Reranker<br/>Score 15 candidates<br/>Return top 4"]
+    end
+
+    subgraph Memory["Conversation Memory"]
+        HISTORY["Message History"]
+        COMPACT["Context Compaction<br/>(8000 token limit)"]
+    end
+
+    subgraph Output["Streaming Output"]
+        STREAM["Character-by-Character<br/>Streaming"]
+    end
+
+    %% Main Flow
+    CLI --> |"User Query"| QueryEval
+    QE_CLASSIFY --> QE_LAMBDA
+    QE_LAMBDA --> STATE
+
+    STATE --> REACT
+    REACT --> |"Invoke Tool"| TOOLS
+    TOOLS --> KBTool
+
+    %% Search Flow
+    RETRIEVER --> VS_EMBED
+    VS_EMBED --> |"768-dim vector"| EMB
+    EMB --> VS_QUERY
+    VS_QUERY --> IVFFLAT
+
+    RETRIEVER --> TS_PARSE
+    TS_PARSE --> TS_RANK
+    TS_RANK --> TSVECTOR
+
+    IVFFLAT --> |"Vector Results"| RRF
+    TSVECTOR --> |"Text Results"| RRF
+
+    RRF --> |"15 candidates"| RERANKER
+    RERANKER --> RERANK
+    RERANK --> |"Scored docs"| RERANKER
+    RERANKER --> |"Top 4 docs"| REACT
+
+    %% LLM Reasoning
+    REACT --> |"Generate Response"| LLM
+    LLM --> |"Streamed tokens"| STREAM
+    STREAM --> CLI
+
+    %% Persistence
+    REACT --> CHECKPOINT
+    CHECKPOINT --> CHECKPOINTS
+    REACT --> HISTORY
+    HISTORY --> COMPACT
+    COMPACT --> CONVOS
+
+    %% Data Storage
+    CHUNKS --> IVFFLAT
+    CHUNKS --> TSVECTOR
+    DOCS --> CHUNKS
 ```
 
 ## Tech Stack
