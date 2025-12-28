@@ -11,6 +11,7 @@ A production-grade LangGraph ReAct agent with real-time streaming, local knowled
 ## What is It?
 
 A fully local LangChain agent that combines:
+
 - **🧠 Intelligent Reasoning**: Streams thinking process and responses
 - **📚 Semantic Search**: Local PostgreSQL + PGVector knowledge base
 - **💾 Persistent Memory**: Conversation history with multi-turn context
@@ -140,14 +141,14 @@ flowchart TB
 
 ## Tech Stack
 
-| Component | Technology |
-|-----------|-----------|
-| **LLM** | Ollama + gpt-oss:20b |
-| **Embeddings** | Ollama + nomic-embed-text |
-| **Reranker** | Qwen3-Reranker-8B (HuggingFace) |
-| **Vector Store** | PostgreSQL + PGVector |
-| **Agent Framework** | LangGraph |
-| **Memory** | PostgreSQL |
+| Component           | Technology                      |
+| ------------------- | ------------------------------- |
+| **LLM**             | Ollama + gpt-oss:20b            |
+| **Embeddings**      | Ollama + nomic-embed-text       |
+| **Reranker**        | Qwen3-Reranker-8B (HuggingFace) |
+| **Vector Store**    | PostgreSQL + PGVector           |
+| **Agent Framework** | LangGraph                       |
+| **Memory**          | PostgreSQL                      |
 
 ## Setup (3 Steps)
 
@@ -164,6 +165,7 @@ python main.py
 ```
 
 That's it! The `setup.py` script handles:
+
 - Database initialization
 - PGVector extension setup
 - Vector indexes & full-text search
@@ -184,7 +186,7 @@ That's it! The `setup.py` script handles:
 
 ## Example Queries
 
-```
+```text
 You: What is Python programming?
 [Reranker] Reranking 15 candidates → top 4 selected
 Agent (response): Python is a high-level programming language...
@@ -193,15 +195,17 @@ Agent (response): Python is a high-level programming language...
 ## Documentation
 
 ### For Users
+
 - **[README](langchain_agent/README.md)** - Features, usage, commands, troubleshooting
 - **[SETUP](langchain_agent/SETUP.md)** - Installation and configuration
 
 ### For Developers
+
 - **[DEVELOPER](langchain_agent/DEVELOPER.md)** - Architecture, components, extending
 
 ## Directory Structure
 
-```
+```text
 rusty-compass/
 ├── README.md                  # This file
 ├── docker-compose.yml         # PostgreSQL + PGVector setup
@@ -223,7 +227,7 @@ rusty-compass/
 ## Performance
 
 | Operation | Time |
-|-----------|------|
+| --------- | ---- |
 | First query | 15-30s (model loading) |
 | Subsequent queries | 6-32s (search + reasoning) |
 | Vector search | ~600ms |
