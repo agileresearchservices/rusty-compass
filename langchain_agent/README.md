@@ -42,6 +42,8 @@ Credentials:
 - Port: 5432
 - User: postgres
 - Password: postgres
+- Database: postgres
+- Connection String: `postgresql://postgres:postgres@localhost:5432/postgres`
 
 ### 3. Reranker Model (Optional but Recommended)
 The agent includes a cross-encoder reranker to improve search result quality. The model is downloaded automatically on first run from HuggingFace:
