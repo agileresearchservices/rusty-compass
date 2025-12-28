@@ -272,6 +272,7 @@ class CustomAgentState(TypedDict):
 
     # Reflection state
     iteration_count: int                          # Track retrieval iterations (0, 1, or 2)
+    response_retry_count: int                     # Track response regeneration attempts
     retrieved_documents: List[Document]           # Raw documents from retrieval
     document_grades: List[DocumentGrade]          # Individual document grades
     document_grade_summary: ReflectionResult      # Overall document relevance
@@ -1021,6 +1022,53 @@ Example response:
             print(f"[Reflection] Max iterations reached. Proceeding with available documents.")
         return "agent"
 
+    def route_after_response_grading(self, state: CustomAgentState) -> str:
+        """
+        Route after response grading: end or retry with feedback.
+
+        If the response failed grading and retries are available, routes back
+        to the agent with feedback to improve the response.
+        """
+        if not ENABLE_REFLECTION or not ENABLE_RESPONSE_GRADING:
+            return "END"
+
+        response_grade = state.get("response_grade", {})
+        retry_count = state.get("response_retry_count", 0)
+
+        # If response is good, we're done
+        if response_grade.get("grade") == "pass":
+            return "END"
+
+        # If response is bad but can retry
+        if retry_count < REFLECTION_MAX_ITERATIONS:
+            print(f"[Reflection] Response failed grading. Retry {retry_count + 1}/{REFLECTION_MAX_ITERATIONS}")
+            return "response_improver"
+
+        # Max retries reached
+        print(f"[Reflection] Response retry limit reached. Ending with current response.")
+        return "END"
+
+    def response_improver_node(self, state: CustomAgentState) -> Dict[str, Any]:
+        """
+        Add feedback message to prompt the agent to improve its response.
+
+        Increments retry counter and adds a system message with the grading
+        feedback to help the agent generate a better response.
+        """
+        response_grade = state.get("response_grade", {})
+        retry_count = state.get("response_retry_count", 0)
+        reasoning = response_grade.get("reasoning", "Response was incomplete or unclear")
+
+        # Create feedback message for the agent
+        feedback_msg = HumanMessage(
+            content=f"[Response needs improvement] {reasoning}. Please provide a complete, well-structured response."
+        )
+
+        return {
+            "messages": [feedback_msg],
+            "response_retry_count": retry_count + 1
+        }
+
     # ========================================================================
     # REFLECTION NODES
     # ========================================================================
@@ -1326,6 +1374,7 @@ Only FAIL responses that are clearly wrong, irrelevant, or too incomplete to be 
                 workflow.add_node("query_transformer", self.query_transformer_node)
             if ENABLE_RESPONSE_GRADING:
                 workflow.add_node("response_grader", self.response_grader_node)
+                workflow.add_node("response_improver", self.response_improver_node)
 
         # Set entry point
         workflow.set_entry_point("query_evaluator")
@@ -1344,8 +1393,17 @@ Only FAIL responses that are clearly wrong, irrelevant, or too incomplete to be 
                     "END": END
                 }
             )
-            # Response grader -> END
-            workflow.add_edge("response_grader", END)
+            # Response grader -> conditional: END or response_improver
+            workflow.add_conditional_edges(
+                "response_grader",
+                self.route_after_response_grading,
+                {
+                    "END": END,
+                    "response_improver": "response_improver"
+                }
+            )
+            # Response improver -> back to agent for another try
+            workflow.add_edge("response_improver", "agent")
         else:
             workflow.add_conditional_edges(
                 "agent",
@@ -1780,6 +1838,7 @@ Summary:"""
                 "query_analysis": "",
                 # Reflection state initialization
                 "iteration_count": 0,
+                "response_retry_count": 0,
                 "retrieved_documents": [],
                 "document_grades": [],
                 "document_grade_summary": {},
