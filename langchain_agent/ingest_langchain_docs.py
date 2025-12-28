@@ -94,6 +94,42 @@ def discover_markdown_files(base_dir: Path, source_dirs: List[str]) -> List[Path
     return markdown_files
 
 
+def is_binary_content(content: str) -> bool:
+    """
+    Detect if content appears to be binary/base64 encoded data.
+
+    Returns True if content looks like binary data that shouldn't be ingested.
+    """
+    # Check for long stretches of base64-like characters (no spaces, repetitive)
+    # Base64 uses A-Za-z0-9+/= characters
+    base64_pattern = re.compile(r'[A-Za-z0-9+/=]{100,}')
+    matches = base64_pattern.findall(content)
+
+    if matches:
+        # If we have large base64-like blocks, check their total size
+        total_base64_chars = sum(len(m) for m in matches)
+        if total_base64_chars > len(content) * 0.3:  # More than 30% is base64-like
+            return True
+
+    # Check for repetitive character patterns (common in encoded images)
+    repetitive_pattern = re.compile(r'(.)\1{20,}')  # Same char repeated 20+ times
+    if repetitive_pattern.search(content):
+        # Check if significant portion is repetitive
+        repetitive_matches = repetitive_pattern.findall(content)
+        if len(repetitive_matches) > 5:
+            return True
+
+    # Check for very low text entropy (lots of repeated short sequences)
+    if len(content) > 500:
+        # Sample the content and check for unusual character distribution
+        sample = content[:1000]
+        unique_chars = len(set(sample))
+        if unique_chars < 30:  # Very few unique characters suggests binary
+            return True
+
+    return False
+
+
 def process_markdown(content: str, file_path: Path) -> str:
     """
     Clean markdown/MDX content for ingestion.
@@ -102,9 +138,16 @@ def process_markdown(content: str, file_path: Path) -> str:
     - Preserves code blocks with language annotations
     - Cleans up excessive whitespace
     - Removes NUL bytes that PostgreSQL cannot handle
+    - Removes base64 encoded images and binary data
     """
     # Remove NUL bytes (PostgreSQL text fields cannot contain them)
     content = content.replace('\x00', '')
+
+    # Remove base64 encoded images (data:image/... patterns)
+    content = re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+', '[image removed]', content)
+
+    # Remove large base64 blocks (likely embedded images or binary data)
+    content = re.sub(r'[A-Za-z0-9+/=]{200,}', '[binary data removed]', content)
 
     # Remove MDX import statements
     content = re.sub(r'^import\s+.*$', '', content, flags=re.MULTILINE)
@@ -259,6 +302,10 @@ def ingest_documents(
 
                 # Skip empty documents
                 if len(content.strip()) < 50:
+                    continue
+
+                # Skip documents that are mostly binary/base64 content
+                if is_binary_content(content):
                     continue
 
                 # Generate metadata
