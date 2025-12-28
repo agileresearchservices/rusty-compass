@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom base styles */
+@layer base {
+  body {
+    @apply bg-gray-900 text-gray-100 antialiased;
+  }
+
+  /* Custom scrollbar styling */
+  ::-webkit-scrollbar {
+    @apply w-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-800;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-600 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-500;
+  }
+}
+
+/* Custom component styles */
+@layer components {
+  /* Node status badges */
+  .node-badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .node-badge-running {
+    @apply bg-blue-500/20 text-blue-400 border border-blue-500/30;
+  }
+
+  .node-badge-complete {
+    @apply bg-emerald-500/20 text-emerald-400 border border-emerald-500/30;
+  }
+
+  .node-badge-error {
+    @apply bg-red-500/20 text-red-400 border border-red-500/30;
+  }
+
+  /* Score bar visualization */
+  .score-bar {
+    @apply h-2 rounded-full bg-gray-700 overflow-hidden;
+  }
+
+  .score-bar-fill {
+    @apply h-full rounded-full transition-all duration-300;
+  }
+
+  /* Card styles for observability panel */
+  .obs-card {
+    @apply bg-gray-800/50 border border-gray-700/50 rounded-lg p-4 backdrop-blur-sm;
+  }
+
+  .obs-card-header {
+    @apply flex items-center justify-between mb-3;
+  }
+
+  .obs-card-title {
+    @apply text-sm font-medium text-gray-200;
+  }
+
+  /* Chat message styles */
+  .chat-message {
+    @apply rounded-lg px-4 py-3 max-w-[85%];
+  }
+
+  .chat-message-user {
+    @apply bg-blue-600 text-white ml-auto;
+  }
+
+  .chat-message-assistant {
+    @apply bg-gray-800 text-gray-100 mr-auto;
+  }
+
+  /* Markdown rendering */
+  .markdown-content {
+    @apply prose prose-invert prose-sm max-w-none;
+  }
+
+  .markdown-content pre {
+    @apply bg-gray-900 rounded-lg p-4 overflow-x-auto;
+  }
+
+  .markdown-content code {
+    @apply bg-gray-800 px-1 py-0.5 rounded text-sm;
+  }
+
+  .markdown-content pre code {
+    @apply bg-transparent p-0;
+  }
+
+  /* Pulse animation for active nodes */
+  .node-active {
+    @apply relative;
+  }
+
+  .node-active::before {
+    content: '';
+    @apply absolute inset-0 rounded-lg animate-pulse-slow;
+    background: linear-gradient(90deg, rgba(59, 130, 246, 0.1), rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.1));
+  }
+}
+
+/* React Flow custom styles */
+.react-flow__node {
+  @apply rounded-lg border-2 bg-gray-800 text-gray-100;
+}
+
+.react-flow__edge-path {
+  @apply stroke-gray-500;
+}
+
+.react-flow__handle {
+  @apply bg-gray-500;
+}

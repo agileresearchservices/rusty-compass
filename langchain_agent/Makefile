@@ -1,10 +1,11 @@
-.PHONY: help setup test lint format clean run test-reranker test-hybrid test-query
+.PHONY: help setup test lint format clean run test-reranker test-hybrid test-query dev dev-api dev-web install-web
 
 help:
 	@echo "Rusty Compass - Development Commands"
 	@echo ""
 	@echo "Setup & Initialization:"
 	@echo "  make setup              - Run complete system setup (database, models, data)"
+	@echo "  make install-web        - Install web UI dependencies (npm install)"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test               - Run all test suites"
@@ -18,7 +19,10 @@ help:
 	@echo "  make type-check         - Check types with mypy (if installed)"
 	@echo ""
 	@echo "Running:"
-	@echo "  make run                - Start the agent"
+	@echo "  make run                - Start the CLI agent"
+	@echo "  make dev                - Start full dev environment (API + Web UI)"
+	@echo "  make dev-api            - Start FastAPI backend only (port 8000)"
+	@echo "  make dev-web            - Start React frontend only (port 5173)"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean              - Remove generated files and caches"
@@ -90,5 +94,31 @@ clean-db:
 	@sleep 3
 	python3 -c "from setup import drop_all_tables; drop_all_tables()" || echo "Database cleanup failed or database not initialized"
 	@echo "✓ Database cleaned"
+
+# Web UI development
+install-web:
+	@echo "Installing web UI dependencies..."
+	cd web && npm install
+
+dev-api:
+	@echo "Starting FastAPI backend on http://localhost:8000..."
+	@echo "API docs available at http://localhost:8000/docs"
+	uvicorn api.main:app --reload --port 8000
+
+dev-web:
+	@echo "Starting React frontend on http://localhost:5173..."
+	cd web && npm run dev
+
+dev:
+	@echo "Starting full development environment..."
+	@echo "  Backend:  http://localhost:8000"
+	@echo "  Frontend: http://localhost:5173"
+	@echo ""
+	@echo "Run in separate terminals:"
+	@echo "  Terminal 1: make dev-api"
+	@echo "  Terminal 2: make dev-web"
+	@echo ""
+	@echo "Or start both now (backend in background):"
+	@( uvicorn api.main:app --reload --port 8000 & ) && cd web && npm run dev
 
 .SILENT: help

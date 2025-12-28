@@ -81,6 +81,10 @@ langchain_agent/__pycache__/
 *.pyc
 .claude/
 
+# Web UI
+web/node_modules/
+web/dist/
+
 # OS-specific
 .DS_Store
 Thumbs.db
