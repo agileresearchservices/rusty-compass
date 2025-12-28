@@ -784,6 +784,9 @@ class LangChainAgent:
         self.checkpointer = PostgresSaver(self.pool)
         print("✓ Postgres checkpoint store initialized")
 
+        # Ensure conversation metadata table exists
+        self._ensure_metadata_table()
+
         print()
 
     # ========================================================================
@@ -1394,6 +1397,23 @@ Only FAIL responses that are clearly wrong, irrelevant, or too incomplete to be 
         """Set a specific thread ID to resume a conversation"""
         self.thread_id = thread_id
 
+    def _ensure_metadata_table(self):
+        """Ensure the conversation_metadata table exists"""
+        try:
+            with psycopg.connect(DATABASE_URL) as conn:
+                conn.autocommit = True
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS conversation_metadata (
+                            thread_id TEXT PRIMARY KEY,
+                            title TEXT NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+        except Exception as e:
+            print(f"Warning: Could not create conversation_metadata table: {e}")
+
     def list_conversations(self):
         """List available previous conversations from PostgreSQL with titles"""
         try:
@@ -1437,27 +1457,69 @@ Only FAIL responses that are clearly wrong, irrelevant, or too incomplete to be 
             print(f"Error clearing conversations: {e}")
             return 0, 0
 
-    def save_conversation_title(self, user_message: str):
-        """Generate and save a title for the current conversation from the first user message"""
+    def generate_conversation_title(self, messages: list) -> str:
+        """Use the LLM to generate a concise title for the conversation"""
         try:
-            # Create a short title from the first message (first 50 chars)
-            title = user_message[:60].strip()
-            if not title:
-                title = "Untitled Conversation"
+            # Build a summary of the conversation for title generation
+            conversation_summary = []
+            for msg in messages[-6:]:  # Use last 6 messages for context
+                if hasattr(msg, "content") and msg.content:
+                    role = "User" if msg.type == "human" else "Assistant"
+                    content = str(msg.content)[:200]  # Truncate long messages
+                    conversation_summary.append(f"{role}: {content}")
+
+            if not conversation_summary:
+                return "New Conversation"
+
+            prompt = f"""Generate a very short title (max 50 chars) for this conversation.
+The title should capture the main topic or question being discussed.
+Return ONLY the title, nothing else.
+
+Conversation:
+{chr(10).join(conversation_summary)}
+
+Title:"""
+
+            response = self.llm.invoke(prompt)
+            title = response.content.strip().strip('"\'')[:50]
+            return title if title else "Untitled Conversation"
+        except Exception:
+            # Fallback: use first user message
+            for msg in messages:
+                if hasattr(msg, "type") and msg.type == "human" and msg.content:
+                    return str(msg.content)[:50].strip()
+            return "Untitled Conversation"
+
+    def update_conversation_title(self):
+        """Generate and save a title for the current conversation based on its content"""
+        try:
+            # Get current conversation messages from checkpoint
+            checkpoint = self.checkpointer.get({"configurable": {"thread_id": self.thread_id}})
+            if not checkpoint:
+                return
+
+            # Access messages from channel_values (checkpoint is a dict)
+            channel_values = checkpoint.get("channel_values", {})
+            messages = channel_values.get("messages", [])
+            if not messages:
+                return
+
+            # Generate title from conversation
+            title = self.generate_conversation_title(messages)
 
             with psycopg.connect(DATABASE_URL) as conn:
                 conn.autocommit = True
                 with conn.cursor() as cur:
-                    # Insert or update conversation metadata
+                    # Insert or update conversation metadata with new title
                     cur.execute("""
                         INSERT INTO conversation_metadata (thread_id, title)
                         VALUES (%s, %s)
                         ON CONFLICT (thread_id)
-                        DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+                        DO UPDATE SET title = EXCLUDED.title, updated_at = CURRENT_TIMESTAMP
                     """, (self.thread_id, title))
         except Exception as e:
-            # Don't fail the conversation if metadata save fails
-            pass
+            # Log the error but don't fail the conversation
+            print(f"Warning: Could not update conversation title: {e}")
 
     def estimate_token_count(self, messages: Sequence[BaseMessage]) -> int:
         """
@@ -1588,10 +1650,8 @@ Summary:"""
 
         self.generate_thread_id()
         print(f"Conversation ID: {self.thread_id}")
-        print("(Title will be generated from your first message)")
+        print("(Title will be updated after each message)")
         print()
-
-        first_message = True
 
         while True:
             try:
@@ -1600,11 +1660,6 @@ Summary:"""
 
                 if not user_input:
                     continue
-
-                # Save conversation title from first message
-                if first_message and not user_input.lower().startswith(("list", "load", "new", "quit", "exit")):
-                    self.save_conversation_title(user_input)
-                    first_message = False
 
                 # Handle special commands
                 if user_input.lower() == "quit" or user_input.lower() == "exit":
@@ -1761,6 +1816,9 @@ Summary:"""
                 self._stream_text(final_response)
             else:
                 print("Agent: Processing complete")
+
+            # Update conversation title after each turn
+            self.update_conversation_title()
 
         except httpx.ConnectError as e:
             print(f"✗ Cannot connect to Ollama at {OLLAMA_BASE_URL}")
