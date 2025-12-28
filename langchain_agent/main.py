@@ -1398,10 +1398,16 @@ Only FAIL responses that are clearly wrong, irrelevant, or too incomplete to be 
         self.thread_id = thread_id
 
     def _ensure_metadata_table(self):
-        """Ensure the conversation_metadata table exists"""
+        """Ensure the conversation_metadata table exists.
+
+        Creates the conversation_metadata table if it doesn't already exist.
+        This table stores conversation titles and timestamps for the conversation list.
+
+        Raises:
+            Does not raise exceptions - logs warnings if table creation fails.
+        """
         try:
             with psycopg.connect(DATABASE_URL) as conn:
-                conn.autocommit = True
                 with conn.cursor() as cur:
                     cur.execute("""
                         CREATE TABLE IF NOT EXISTS conversation_metadata (
@@ -1411,8 +1417,11 @@ Only FAIL responses that are clearly wrong, irrelevant, or too incomplete to be 
                             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
                     """)
+                conn.commit()
+        except psycopg.Error as e:
+            logger.warning(f"Could not create conversation_metadata table: {e}")
         except Exception as e:
-            print(f"Warning: Could not create conversation_metadata table: {e}")
+            logger.error(f"Unexpected error creating conversation_metadata table: {e}")
 
     def list_conversations(self):
         """List available previous conversations from PostgreSQL with titles"""
@@ -1457,14 +1466,29 @@ Only FAIL responses that are clearly wrong, irrelevant, or too incomplete to be 
             print(f"Error clearing conversations: {e}")
             return 0, 0
 
-    def generate_conversation_title(self, messages: list) -> str:
-        """Use the LLM to generate a concise title for the conversation"""
+    def generate_conversation_title(self, messages: List[BaseMessage]) -> str:
+        """Use the LLM to generate a concise title for the conversation.
+
+        Analyzes the conversation messages and generates a descriptive title
+        that captures the main topic being discussed.
+
+        Args:
+            messages: List of conversation messages to analyze.
+
+        Returns:
+            A concise title (max 50 characters). Returns a default title if
+            generation fails or no suitable messages are found.
+
+        Raises:
+            Does not raise exceptions - returns fallback titles on error.
+        """
         try:
             # Build a summary of the conversation for title generation
             conversation_summary = []
             for msg in messages[-6:]:  # Use last 6 messages for context
                 if hasattr(msg, "content") and msg.content:
-                    role = "User" if msg.type == "human" else "Assistant"
+                    # Safely get message type
+                    role = "User" if hasattr(msg, "type") and msg.type == "human" else "Assistant"
                     content = str(msg.content)[:200]  # Truncate long messages
                     conversation_summary.append(f"{role}: {content}")
 
@@ -1483,32 +1507,44 @@ Title:"""
             response = self.llm.invoke(prompt)
             title = response.content.strip().strip('"\'')[:50]
             return title if title else "Untitled Conversation"
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Title generation failed, using fallback: {e}")
             # Fallback: use first user message
             for msg in messages:
-                if hasattr(msg, "type") and msg.type == "human" and msg.content:
+                if hasattr(msg, "type") and msg.type == "human" and hasattr(msg, "content") and msg.content:
                     return str(msg.content)[:50].strip()
             return "Untitled Conversation"
 
     def update_conversation_title(self):
-        """Generate and save a title for the current conversation based on its content"""
+        """Generate and save a title for the current conversation based on its content.
+
+        Retrieves the current conversation messages from the checkpoint, generates
+        a descriptive title using the LLM, and stores it in the conversation_metadata table.
+
+        This method is called after each agent response to keep the title up-to-date
+        with the conversation content.
+
+        Raises:
+            Does not raise exceptions - logs warnings if title update fails.
+        """
         try:
             # Get current conversation messages from checkpoint
             checkpoint = self.checkpointer.get({"configurable": {"thread_id": self.thread_id}})
             if not checkpoint:
+                logger.debug("No checkpoint found for title update")
                 return
 
             # Access messages from channel_values (checkpoint is a dict)
             channel_values = checkpoint.get("channel_values", {})
             messages = channel_values.get("messages", [])
             if not messages:
+                logger.debug("No messages in checkpoint for title update")
                 return
 
             # Generate title from conversation
             title = self.generate_conversation_title(messages)
 
             with psycopg.connect(DATABASE_URL) as conn:
-                conn.autocommit = True
                 with conn.cursor() as cur:
                     # Insert or update conversation metadata with new title
                     cur.execute("""
@@ -1517,9 +1553,11 @@ Title:"""
                         ON CONFLICT (thread_id)
                         DO UPDATE SET title = EXCLUDED.title, updated_at = CURRENT_TIMESTAMP
                     """, (self.thread_id, title))
+                conn.commit()
+        except psycopg.Error as e:
+            logger.warning(f"Database error updating conversation title: {e}")
         except Exception as e:
-            # Log the error but don't fail the conversation
-            print(f"Warning: Could not update conversation title: {e}")
+            logger.error(f"Unexpected error updating conversation title: {e}")
 
     def estimate_token_count(self, messages: Sequence[BaseMessage]) -> int:
         """
