@@ -168,8 +168,13 @@ flowchart TB
 # 1. Start PostgreSQL
 docker compose up -d
 
-# 2. Run unified setup
+# 2. Run unified setup (choose your knowledge base)
 cd langchain_agent
+
+# Option A: Use LangChain/LangGraph/LangSmith documentation (recommended)
+python setup.py --docs-source langchain
+
+# Option B: Use sample documents (for quick testing)
 python setup.py
 
 # 3. Run the agent
@@ -182,7 +187,30 @@ That's it! The `setup.py` script handles:
 - PGVector extension setup
 - Vector indexes & full-text search
 - Ollama model pulling (LLM, embeddings, reranker)
-- Sample data loading with embeddings
+- Document loading with embeddings
+
+### LangChain Documentation Knowledge Base
+
+The agent can be configured with official LangChain documentation as its knowledge base:
+
+```bash
+# Full setup with LangChain docs
+python setup.py --docs-source langchain
+
+# Or run ingestion separately
+python ingest_langchain_docs.py
+
+# Update to latest docs
+python ingest_langchain_docs.py --update
+
+# Check current stats
+python ingest_langchain_docs.py --stats
+```
+
+This ingests **~2,000 documents** from:
+- **LangChain** - Core framework documentation
+- **LangGraph** - Graph-based agent orchestration
+- **LangSmith** - Observability and tracing platform
 
 ## Features
 
@@ -199,9 +227,19 @@ That's it! The `setup.py` script handles:
 
 ## Example Queries
 
+With LangChain documentation knowledge base:
+```text
+You: What is LangGraph?
+[Reranker] Reranking 15 candidates → top 4 selected
+Agent (response): LangGraph is a library for building stateful, multi-actor applications...
+
+You: How do I create a ReAct agent in LangChain?
+Agent (response): To create a ReAct agent, you can use create_react_agent()...
+```
+
+With sample documents:
 ```text
 You: What is Python programming?
-[Reranker] Reranking 15 candidates → top 4 selected
 Agent (response): Python is a high-level programming language...
 ```
 
@@ -222,12 +260,13 @@ Agent (response): Python is a high-level programming language...
 rusty-compass/
 ├── README.md                  # This file
 ├── docker-compose.yml         # PostgreSQL + PGVector setup
-├── sample_docs/               # Knowledge base documents
+├── sample_docs/               # Sample knowledge base documents (optional)
 │   ├── python_basics.txt
 │   ├── machine_learning_intro.txt
 │   └── web_development.txt
 └── langchain_agent/           # Main application
     ├── setup.py               # Unified setup (ONE COMMAND)
+    ├── ingest_langchain_docs.py  # LangChain docs ingestion
     ├── main.py                # Agent entry point
     ├── config.py              # Configuration
     ├── requirements.txt       # Dependencies

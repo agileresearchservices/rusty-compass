@@ -39,10 +39,10 @@ def show_reranking_comparison(query: str, original_docs, reranked_results):
             print(f"    ➜ Partial reordering in relevance scores")
 
 
-def test_ml_query():
-    """Test reranking with machine learning query"""
+def test_langgraph_query():
+    """Test reranking with LangGraph query"""
     print("\n" + "=" * 70)
-    print("Test 1: Machine Learning Query")
+    print("Test 1: LangGraph Query")
     print("=" * 70)
 
     try:
@@ -50,24 +50,24 @@ def test_ml_query():
 
         docs = [
             Document(
-                page_content="Python is a high-level programming language known for its simplicity",
-                metadata={"source": "python_guide.txt"}
+                page_content="LangChain is a framework for developing applications powered by large language models",
+                metadata={"source": "langchain_intro.mdx"}
             ),
             Document(
-                page_content="Machine learning is a subset of artificial intelligence that enables systems to learn from data",
-                metadata={"source": "ml_guide.txt"}
+                page_content="LangGraph is a library for building stateful, multi-actor applications with LLMs, used for agent workflows",
+                metadata={"source": "langgraph_intro.mdx"}
             ),
             Document(
-                page_content="Neural networks are computational models inspired by biological neural networks",
-                metadata={"source": "neural_nets.txt"}
+                page_content="StateGraph is the main class in LangGraph for defining workflows with nodes and edges",
+                metadata={"source": "langgraph_state.mdx"}
             ),
             Document(
-                page_content="Web development involves building websites and web applications using HTML, CSS, and JavaScript",
-                metadata={"source": "web_dev.txt"}
+                page_content="LangSmith is a platform for debugging, testing, and monitoring LLM applications",
+                metadata={"source": "langsmith_intro.mdx"}
             ),
         ]
 
-        query = "What is machine learning and how do neural networks work?"
+        query = "What is LangGraph and how do I create workflows with StateGraph?"
         results = reranker.rerank(query, docs, top_k=3)
 
         print(f"✓ Reranking completed")
@@ -84,10 +84,10 @@ def test_ml_query():
         return False
 
 
-def test_programming_query():
-    """Test reranking with programming query"""
+def test_rag_query():
+    """Test reranking with RAG pipeline query"""
     print("=" * 70)
-    print("Test 2: Programming Query")
+    print("Test 2: RAG Pipeline Query")
     print("=" * 70)
 
     try:
@@ -95,24 +95,24 @@ def test_programming_query():
 
         docs = [
             Document(
-                page_content="Django is a high-level Python web framework for rapid development",
-                metadata={"source": "django_guide.txt"}
+                page_content="Document loaders in LangChain help ingest data from various sources like PDFs and web pages",
+                metadata={"source": "document_loaders.mdx"}
             ),
             Document(
-                page_content="Flask is a lightweight Python web framework for building APIs",
-                metadata={"source": "flask_guide.txt"}
+                page_content="Text splitters divide documents into smaller chunks for embedding and retrieval",
+                metadata={"source": "text_splitters.mdx"}
             ),
             Document(
-                page_content="REST API design patterns help create scalable web services",
-                metadata={"source": "rest_api.txt"}
+                page_content="Vector stores like Chroma and Pinecone store embeddings for similarity search",
+                metadata={"source": "vector_stores.mdx"}
             ),
             Document(
-                page_content="Database design involves creating efficient data structures and relationships",
-                metadata={"source": "db_design.txt"}
+                page_content="Retrievers fetch relevant documents from vector stores based on query similarity",
+                metadata={"source": "retrievers.mdx"}
             ),
         ]
 
-        query = "How do I build a REST API with Python and Flask?"
+        query = "How do I build a RAG pipeline with document loaders and vector stores?"
         results = reranker.rerank(query, docs, top_k=3)
 
         print(f"✓ Reranking completed")
@@ -139,17 +139,17 @@ def test_score_range():
         reranker = Qwen3Reranker(model_name="Qwen/Qwen3-Reranker-8B")
 
         docs = [
-            Document(page_content="Python programming language", metadata={"source": "doc1.txt"}),
-            Document(page_content="JavaScript basics", metadata={"source": "doc2.txt"}),
-            Document(page_content="Database design", metadata={"source": "doc3.txt"}),
-            Document(page_content="Web frameworks", metadata={"source": "doc4.txt"}),
-            Document(page_content="Machine learning", metadata={"source": "doc5.txt"}),
+            Document(page_content="LangChain agents use tools to interact with external systems", metadata={"source": "agents.mdx"}),
+            Document(page_content="LangGraph enables complex multi-step workflows", metadata={"source": "langgraph.mdx"}),
+            Document(page_content="LangSmith provides tracing and evaluation", metadata={"source": "langsmith.mdx"}),
+            Document(page_content="LCEL is the expression language for chains", metadata={"source": "lcel.mdx"}),
+            Document(page_content="Retrievers fetch documents from vector stores", metadata={"source": "retrievers.mdx"}),
         ]
 
         queries = [
-            "Python programming",
-            "What is machine learning?",
-            "How to build web applications?",
+            "LangChain agents",
+            "What is LangGraph?",
+            "How to trace LLM applications?",
         ]
 
         all_valid = True
@@ -188,24 +188,24 @@ def test_relevance_ordering():
 
         docs = [
             Document(
-                page_content="Python is a high-level programming language",
-                metadata={"source": "python_basics.txt"}
+                page_content="LangChain is a framework for building LLM applications",
+                metadata={"source": "langchain_overview.mdx"}
             ),
             Document(
-                page_content="Learning Python programming for beginners",
-                metadata={"source": "python_tutorial.txt"}
+                page_content="Getting started with LangChain for beginners",
+                metadata={"source": "langchain_quickstart.mdx"}
             ),
             Document(
-                page_content="Advanced Python techniques and optimization",
-                metadata={"source": "python_advanced.txt"}
+                page_content="Advanced LangChain patterns and best practices",
+                metadata={"source": "langchain_advanced.mdx"}
             ),
             Document(
-                page_content="JavaScript is a programming language for web browsers",
-                metadata={"source": "javascript.txt"}
+                page_content="LangSmith is a platform for debugging LLM applications",
+                metadata={"source": "langsmith_overview.mdx"}
             ),
         ]
 
-        query = "How do I learn Python programming?"
+        query = "How do I get started with LangChain?"
         results = reranker.rerank(query, docs, top_k=4)
 
         print(f"\n  Query: {query}\n")
@@ -250,13 +250,13 @@ def test_performance():
         # Create test documents
         docs = [
             Document(
-                page_content=f"Document {i}: This is sample content about various programming topics and techniques",
-                metadata={"source": f"doc{i}.txt"}
+                page_content=f"Document {i}: This is sample content about LangChain, LangGraph, and building LLM applications",
+                metadata={"source": f"langchain_doc{i}.mdx"}
             )
             for i in range(10)
         ]
 
-        query = "What are programming best practices?"
+        query = "What are the best practices for building agents with LangChain?"
 
         # Measure reranking time
         start = time.time()
@@ -350,8 +350,8 @@ def main():
     print("=" * 70)
 
     tests = [
-        ("Machine Learning Query", test_ml_query),
-        ("Programming Query", test_programming_query),
+        ("LangGraph Query", test_langgraph_query),
+        ("RAG Pipeline Query", test_rag_query),
         ("Score Range", test_score_range),
         ("Relevance Ordering", test_relevance_ordering),
         ("Performance", test_performance),

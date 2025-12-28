@@ -197,22 +197,22 @@ def test_document_grader_standalone():
         # Create test documents
         test_docs = [
             Document(
-                page_content="Python is a programming language known for its simplicity and readability.",
-                metadata={"source": "python_basics.txt"}
+                page_content="LangGraph is a library for building stateful, multi-actor applications with LLMs.",
+                metadata={"source": "langgraph_intro.mdx"}
             ),
             Document(
-                page_content="Machine learning enables computers to learn from data without explicit programming.",
-                metadata={"source": "ml_intro.txt"}
+                page_content="LangChain provides tools for building applications powered by large language models.",
+                metadata={"source": "langchain_intro.mdx"}
             ),
             Document(
-                page_content="Web development involves creating websites using HTML, CSS, and JavaScript.",
-                metadata={"source": "web_dev.txt"}
+                page_content="LangSmith is a platform for debugging, testing, and monitoring LLM applications.",
+                metadata={"source": "langsmith_intro.mdx"}
             ),
         ]
 
         # Create mock state for testing
         mock_state = {
-            "messages": [HumanMessage(content="What is Python?")],
+            "messages": [HumanMessage(content="What is LangGraph?")],
             "lambda_mult": 0.5,
             "query_analysis": "",
             "iteration_count": 0,
@@ -220,7 +220,7 @@ def test_document_grader_standalone():
             "document_grades": [],
             "document_grade_summary": {},
             "response_grade": {},
-            "original_query": "What is Python?",
+            "original_query": "What is LangGraph?",
             "transformed_query": None,
         }
 
@@ -265,8 +265,8 @@ def test_response_grader_standalone():
         # Create mock state with a response
         mock_state = {
             "messages": [
-                HumanMessage(content="What is Python?"),
-                AIMessage(content="Python is a high-level, general-purpose programming language known for its clean syntax and readability. It was created by Guido van Rossum and first released in 1991. Python supports multiple programming paradigms including procedural, object-oriented, and functional programming."),
+                HumanMessage(content="What is LangGraph?"),
+                AIMessage(content="LangGraph is a library for building stateful, multi-actor applications with LLMs. It extends LangChain to enable complex workflows with cycles, persistence, and human-in-the-loop patterns. LangGraph uses a graph-based approach where nodes represent processing steps and edges define the flow between them."),
             ],
             "lambda_mult": 0.5,
             "query_analysis": "",
@@ -275,7 +275,7 @@ def test_response_grader_standalone():
             "document_grades": [],
             "document_grade_summary": {"grade": "pass", "score": 0.8, "reasoning": "Documents relevant"},
             "response_grade": {},
-            "original_query": "What is Python?",
+            "original_query": "What is LangGraph?",
             "transformed_query": None,
         }
 
@@ -314,18 +314,18 @@ def test_query_transformer_standalone():
 
         # Create mock state with failed document grades
         mock_state = {
-            "messages": [HumanMessage(content="quantum computing basics")],
+            "messages": [HumanMessage(content="LangGraph subgraph patterns")],
             "lambda_mult": 0.5,
             "query_analysis": "",
             "iteration_count": 0,
             "retrieved_documents": [],
             "document_grades": [
-                {"source": "python.txt", "relevant": False, "score": 0.2, "reasoning": "About Python, not quantum"},
-                {"source": "web.txt", "relevant": False, "score": 0.1, "reasoning": "About web dev, not quantum"},
+                {"source": "langchain.mdx", "relevant": False, "score": 0.2, "reasoning": "About LangChain basics, not subgraphs"},
+                {"source": "langsmith.mdx", "relevant": False, "score": 0.1, "reasoning": "About LangSmith, not LangGraph"},
             ],
             "document_grade_summary": {"grade": "fail", "score": 0.15, "reasoning": "0/2 documents relevant"},
             "response_grade": {},
-            "original_query": "quantum computing basics",
+            "original_query": "LangGraph subgraph patterns",
             "transformed_query": None,
         }
 

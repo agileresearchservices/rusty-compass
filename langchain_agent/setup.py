@@ -3,8 +3,14 @@
 Unified Setup Script for LangChain Agent
 Initializes PostgreSQL database, loads sample data, and pulls Ollama models
 This is the single entry point for complete system setup from scratch
+
+Usage:
+    python setup.py                    # Full setup with sample docs
+    python setup.py --docs-source langchain  # Setup with LangChain docs
+    python setup.py --skip-docs        # Setup without loading any docs
 """
 
+import argparse
 import os
 import sys
 import json
@@ -503,14 +509,38 @@ def verify_data_load() -> bool:
 
 def main():
     """Run complete setup process"""
+    parser = argparse.ArgumentParser(description="Setup LangChain Agent")
+    parser.add_argument(
+        "--docs-source",
+        choices=["sample", "langchain"],
+        default="sample",
+        help="Document source: 'sample' for sample_docs, 'langchain' for LangChain documentation"
+    )
+    parser.add_argument(
+        "--skip-docs",
+        action="store_true",
+        help="Skip document loading (database setup only)"
+    )
+    parser.add_argument(
+        "--skip-models",
+        action="store_true",
+        help="Skip Ollama model pulling"
+    )
+    args = parser.parse_args()
+
     print("\n" + "=" * 70)
     print("LANGCHAIN AGENT - COMPLETE SETUP")
     print("=" * 70)
     print("\nThis script will:")
     print("  1. Create PostgreSQL database")
     print("  2. Initialize tables with vector indexes")
-    print("  3. Pull Ollama models (LLM, embeddings, reranker)")
-    print("  4. Load sample documents with embeddings")
+    if not args.skip_models:
+        print("  3. Pull Ollama models (LLM, embeddings, reranker)")
+    if not args.skip_docs:
+        if args.docs_source == "langchain":
+            print("  4. Load LangChain/LangGraph/LangSmith documentation")
+        else:
+            print("  4. Load sample documents with embeddings")
     print("\n" + "=" * 70)
 
     try:
@@ -524,11 +554,21 @@ def main():
         init_metadata_table()
 
         # Step 2: Ollama Models (optional - can fail if Ollama not running)
-        models_ok = setup_ollama_models()
+        if not args.skip_models:
+            models_ok = setup_ollama_models()
 
-        # Step 3: Sample Data Loading
-        chunk_count = load_sample_data()
-        verify_data_load()
+        # Step 3: Document Loading
+        if not args.skip_docs:
+            if args.docs_source == "langchain":
+                print("\n[6/7] Loading LangChain documentation...")
+                print("      Delegating to ingest_langchain_docs.py...")
+                import ingest_langchain_docs
+                result = ingest_langchain_docs.main()
+                if result != 0:
+                    print("      ⚠ LangChain docs ingestion had issues")
+            else:
+                chunk_count = load_sample_data()
+                verify_data_load()
 
         # Summary
         print("\n" + "=" * 70)
@@ -536,10 +576,16 @@ def main():
         print("=" * 70)
         print("\nYou can now run the agent:")
         print("  python main.py")
-        print("\nExample queries:")
-        print("  - What is Python programming?")
-        print("  - How does machine learning work?")
-        print("  - Tell me about web development")
+        if args.docs_source == "langchain" and not args.skip_docs:
+            print("\nExample queries:")
+            print("  - What is LangGraph?")
+            print("  - How do I create a ReAct agent in LangChain?")
+            print("  - What is LangSmith tracing?")
+        else:
+            print("\nExample queries:")
+            print("  - What is Python programming?")
+            print("  - How does machine learning work?")
+            print("  - Tell me about web development")
         print("\n" + "=" * 70)
 
         return 0
