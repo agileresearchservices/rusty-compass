@@ -216,15 +216,18 @@ Goodbye!
 
 ### Resuming Previous Conversations
 
-All conversations are automatically saved to PostgreSQL. You can:
+All conversations are automatically saved to PostgreSQL with **LLM-generated titles** that summarize the conversation content. Titles are updated after each message to reflect the evolving discussion.
 
 1. **View previous conversations**:
    ```
    You: list
    📋 Previous Conversations:
-     1. conversation_a1b2c3d4
-     2. conversation_f5e6d7c8
-     3. conversation_p9o8n7m6
+     1. RAG Explained
+        ID: conversation_c1bb5ee0 | 2025-12-28 19:04
+     2. Human-in-the-Loop Overview
+        ID: conversation_99af0063 | 2025-12-28 19:15
+     3. What is langsmith?
+        ID: conversation_a7c16fd7 | 2025-12-28 18:49
    ```
 
 2. **Resume a specific conversation**:
@@ -317,8 +320,10 @@ Try these to test the agent's knowledge retrieval:
    - If documents fail grading, query is transformed and retrieval retries (max 2 iterations)
 7. **Response Generation** → LLM generates response based on graded documents
 8. **Response Grading** → LLM evaluates response quality (relevance, completeness, clarity)
-9. **Memory Storage** → Conversation state saved to PostgreSQL
-10. **Output** → Response sent to user with character-by-character streaming
+   - If response fails grading (incomplete/truncated), feedback is added and response retries (max 2 iterations)
+9. **Title Generation** → LLM generates/updates a concise conversation title
+10. **Memory Storage** → Conversation state and title saved to PostgreSQL
+11. **Output** → Response sent to user with character-by-character streaming
 
 ## File Structure
 
@@ -424,16 +429,21 @@ The agent includes a reflection loop that grades retrieved documents and respons
 ```
 query_evaluator → agent → tools → document_grader
                                        ↓
-                              (docs good?) → agent → response_grader → END
+                              (docs good?) → agent → response_grader
+                                       ↓                    ↓
+                              (docs bad?)           (response good?) → END
+                                       ↓                    ↓
+                              query_transformer    (response bad?) → response_improver → agent (retry)
                                        ↓
-                              (docs bad & can retry?) → query_transformer → retry
+                                     retry
 ```
 
 1. After retrieving documents, the **Document Grader** evaluates each document's relevance
 2. If documents fail grading (< 2 relevant docs or avg score < 0.5), the **Query Transformer** rewrites the query
 3. The agent retries with the transformed query (max 2 iterations)
 4. After generating a response, the **Response Grader** evaluates quality
-5. Reflection status is displayed in the console output
+5. If response fails grading (incomplete, truncated, or low quality), the **Response Improver** adds feedback and triggers a retry (max 2 iterations)
+6. Reflection status is displayed in the console output
 
 **Example Output:**
 ```
@@ -449,11 +459,22 @@ query_evaluator → agent → tools → document_grader
 [Query Transformer] 'quantum basics' → 'introduction to quantum computing fundamentals'
 ```
 
+**Response Retry Example:**
+```
+[Response Grader] ✗ FAIL (score: 0.10)
+  The response does not explain the concept and is incomplete.
+[Reflection] Response failed grading. Retry 1/2
+[Response Grader] ✓ PASS (score: 0.90)
+  The response accurately defines the concept and is well-structured.
+```
+
 **Performance Impact:**
 - Document grading: ~2-4s per query (LLM evaluates each document)
 - Response grading: ~1-2s per query
 - Query transformation (if triggered): ~1-2s
-- Total worst case (failed retrieval with retry): ~10s additional
+- Response retry (if triggered): ~3-5s per retry (includes re-generation)
+- Title generation: ~1-2s per turn
+- Total worst case (failed retrieval + failed response with retries): ~15-20s additional
 
 **Disabling Reflection:**
 ```python
