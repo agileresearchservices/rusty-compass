@@ -206,3 +206,6 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 langchain_agent/chroma_db/chroma.sqlite3
+
+# Claude Code
+.claude/
