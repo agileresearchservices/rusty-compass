@@ -8,24 +8,42 @@ Information for developers extending or modifying the LangChain Agent.
 
 ```
 main.py
-├── Qwen3Reranker (Lines 94-202)
+├── Qwen3Reranker (Lines 94-230)
 │   ├── __init__: Load cross-encoder model from HuggingFace
 │   ├── _format_input: Format query-document pairs
 │   ├── score_documents: Score relevance of documents
 │   └── rerank: Score and return top-k documents
 │
-├── SimplePostgresVectorStore (Lines 204-...)
+├── State Types (Lines 244-280)
+│   ├── DocumentGrade: Grade for a single document
+│   ├── ReflectionResult: Result of grading operation
+│   └── CustomAgentState: Extended state with reflection fields
+│
+├── SimplePostgresVectorStore (Lines 283-...)
 │   ├── similarity_search: Vector similarity search
 │   ├── hybrid_search: Vector + full-text (RRF fusion)
 │   └── as_retriever: LangChain retriever interface
 │
-└── LangChainAgent (Lines 530-...)
+└── LangChainAgent (Lines 633-...)
     ├── __init__: Initialize components
     ├── verify_prerequisites: Check all services running
     ├── initialize_components: Load LLM, embeddings, reranker
-    ├── create_agent_graph: Build LangGraph ReAct agent
-    ├── tools_node: Execute retrieval with reranking
-    ├── should_continue: Routing logic
+    │
+    ├── Core Agent Nodes:
+    │   ├── query_evaluator_node: Classify query → lambda_mult
+    │   ├── agent_node: LLM reasoning with tool binding
+    │   ├── tools_node: Execute retrieval with reranking
+    │   └── should_continue: Route to tools or response_grader
+    │
+    ├── Reflection Nodes:
+    │   ├── document_grader_node: Grade document relevance
+    │   ├── query_transformer_node: Rewrite query on failure
+    │   ├── response_grader_node: Evaluate response quality
+    │   ├── route_after_doc_grading: Route to agent or retry
+    │   ├── _grade_document: LLM prompt for document grading
+    │   └── _grade_response: LLM prompt for response grading
+    │
+    ├── create_agent_graph: Build LangGraph with reflection loop
     ├── cleanup: Resource cleanup
     └── run: Interactive loop
 ```
@@ -35,11 +53,11 @@ main.py
 ```
 User Query
     ↓
+[Query Evaluator] Classify query type → dynamic lambda_mult
+    ↓
 [LangChain Agent] ReAct agent reasoning
     ↓
 Tool Call: knowledge_base(query)
-    ↓
-[Query Evaluator] Classify query type → dynamic lambda_mult
     ↓
 [Hybrid Search] RRF fusion of:
     - Vector search (768-dim embeddings)
@@ -49,7 +67,14 @@ Tool Call: knowledge_base(query)
 [Qwen3 Reranker] Score candidates with cross-encoder
     Result: 4 highest-scoring documents
     ↓
-[LLM] Generate response from top 4 documents
+[Document Grader] Evaluate each document's relevance
+    ├── PASS (≥2 relevant docs) → Continue to LLM
+    └── FAIL (<2 relevant docs) → Query Transformer → Retry (max 2)
+    ↓
+[LLM] Generate response from graded documents
+    ↓
+[Response Grader] Evaluate response quality
+    - Relevance, completeness, clarity
     ↓
 [Conversation Memory] Save to PostgreSQL
     ↓
@@ -60,12 +85,13 @@ Tool Call: knowledge_base(query)
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| main.py | 1400+ | Core agent and components |
+| main.py | 1800+ | Core agent with reflection loop |
 | setup.py | 500 | Complete initialization |
-| config.py | 250 | Configuration constants |
+| config.py | 260 | Configuration constants |
 | test_reranker.py | 400 | Reranker unit tests (6 tests) |
 | test_hybrid_search.py | 160 | Search strategy validation |
 | test_query_evaluator.py | 200 | Query classification tests |
+| test_reflection.py | 360 | Reflection loop tests (6 tests) |
 
 ## Testing
 
@@ -83,6 +109,10 @@ python test_hybrid_search.py
 # Query evaluator tests
 python test_query_evaluator.py
 # Validates query classification
+
+# Reflection loop tests
+python test_reflection.py
+# Expected: 6/6 passing
 ```
 
 ### Test Coverage
@@ -105,6 +135,14 @@ python test_query_evaluator.py
 - Factual queries → low lambda (0.1-0.3)
 - Version-specific → medium (0.3-0.5)
 - Conceptual → high lambda (0.8-1.0)
+
+**test_reflection.py**:
+- ✓ Configuration loading
+- ✓ State type definitions (DocumentGrade, ReflectionResult)
+- ✓ Graph creation with reflection nodes
+- ✓ Document grader logic (relevant/irrelevant classification)
+- ✓ Response grader logic (pass/fail with score)
+- ✓ Query transformer logic (rewrite on failure)
 
 ## Component Details
 
@@ -200,6 +238,80 @@ def evaluate_query(query: str, llm) -> float:
     # Map classification → lambda value
     return lambda_mapping[classification]
 ```
+
+### Reflection Loop
+
+**Purpose**: Self-improving agent that grades documents and responses
+
+**Graph Flow**:
+```
+query_evaluator → agent → tools → document_grader
+                                       ↓
+                              (pass) → agent → response_grader → END
+                                       ↓
+                              (fail & retry) → query_transformer → query_evaluator
+```
+
+**Components**:
+
+1. **Document Grader** (`document_grader_node`):
+   - Evaluates each retrieved document for relevance
+   - Uses LLM to score (0.0-1.0) and classify (relevant/irrelevant)
+   - Pass criteria: ≥2 relevant docs AND avg score ≥0.5
+   ```python
+   # For each document:
+   prompt = f"Evaluate if this document is relevant to: {query}\n{doc}"
+   result = llm.invoke(prompt)  # Returns JSON with score and reasoning
+   ```
+
+2. **Query Transformer** (`query_transformer_node`):
+   - Rewrites failed queries for better retrieval
+   - Uses failed document reasons to improve query
+   - Triggers only when docs fail AND iteration < max
+   ```python
+   prompt = f"Rewrite query for better results:\n{query}\nFailed because: {reasons}"
+   new_query = llm.invoke(prompt)
+   ```
+
+3. **Response Grader** (`response_grader_node`):
+   - Evaluates final response quality
+   - Checks relevance, completeness, clarity
+   - Returns pass/fail with score and reasoning
+   ```python
+   prompt = f"Evaluate response quality for: {query}\nResponse: {response}"
+   result = llm.invoke(prompt)  # Returns JSON with grade and score
+   ```
+
+**State Fields**:
+```python
+class CustomAgentState(TypedDict):
+    # ... existing fields ...
+    iteration_count: int              # 0, 1, or 2 (max iterations)
+    retrieved_documents: List[Document]
+    document_grades: List[DocumentGrade]
+    document_grade_summary: ReflectionResult
+    response_grade: ReflectionResult
+    original_query: str               # Preserved for transformation
+    transformed_query: Optional[str]  # Rewritten query
+```
+
+**Configuration**:
+```python
+ENABLE_REFLECTION = True              # Master switch
+ENABLE_DOCUMENT_GRADING = True        # Grade retrieved docs
+ENABLE_RESPONSE_GRADING = True        # Evaluate response quality
+ENABLE_QUERY_TRANSFORMATION = True    # Rewrite on failure
+REFLECTION_MAX_ITERATIONS = 2         # Max retry attempts
+REFLECTION_MIN_RELEVANT_DOCS = 2      # Docs needed to pass
+REFLECTION_DOC_SCORE_THRESHOLD = 0.5  # Min average score
+REFLECTION_SHOW_STATUS = True         # Console output
+```
+
+**Performance Impact**:
+- Document grading: ~2-4s (LLM evaluates each doc)
+- Response grading: ~1-2s
+- Query transformation: ~1-2s (when triggered)
+- Worst case (retry): ~10s additional
 
 ## Performance Optimization
 

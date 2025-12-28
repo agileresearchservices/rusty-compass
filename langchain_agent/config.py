@@ -58,6 +58,16 @@ __all__ = [
     "MESSAGES_TO_KEEP_FULL",
     "MIN_MESSAGES_FOR_COMPACTION",
     "TOKEN_CHAR_RATIO",
+    # Reflection configuration
+    "ENABLE_REFLECTION",
+    "ENABLE_DOCUMENT_GRADING",
+    "ENABLE_RESPONSE_GRADING",
+    "ENABLE_QUERY_TRANSFORMATION",
+    "REFLECTION_MAX_ITERATIONS",
+    "REFLECTION_MIN_RELEVANT_DOCS",
+    "REFLECTION_DOC_SCORE_THRESHOLD",
+    "REFLECTION_RESPONSE_SCORE_THRESHOLD",
+    "REFLECTION_SHOW_STATUS",
 ]
 
 # ============================================================================
@@ -216,3 +226,30 @@ MIN_MESSAGES_FOR_COMPACTION = 20
 
 # Token estimation (1 token ≈ 4 characters, conservative)
 TOKEN_CHAR_RATIO = 4
+
+# ============================================================================
+# REFLECTION CONFIGURATION (Agent Self-Improvement)
+# ============================================================================
+
+# Enable reflection loop for document grading and response quality evaluation
+ENABLE_REFLECTION = True
+
+# Enable individual reflection components (only used if ENABLE_REFLECTION is True)
+ENABLE_DOCUMENT_GRADING = True      # Grade retrieved documents for relevance
+ENABLE_RESPONSE_GRADING = True      # Evaluate final response quality
+ENABLE_QUERY_TRANSFORMATION = True  # Rewrite query if documents are poor
+
+# Maximum number of retrieval iterations (1 = no retries, 2 = one retry)
+REFLECTION_MAX_ITERATIONS = 2
+
+# Minimum number of relevant documents required to pass grading
+REFLECTION_MIN_RELEVANT_DOCS = 2
+
+# Minimum score threshold for document relevance (0.0-1.0)
+REFLECTION_DOC_SCORE_THRESHOLD = 0.5
+
+# Minimum score threshold for response quality (0.0-1.0)
+REFLECTION_RESPONSE_SCORE_THRESHOLD = 0.6
+
+# Display reflection status in console output
+REFLECTION_SHOW_STATUS = True

@@ -313,21 +313,25 @@ Try these to test the agent's knowledge retrieval:
    - Lexical search: Full-text keyword matching
    - RRF Fusion: Reciprocal rank fusion combines both results (~15 candidates)
 5. **Cross-Encoder Reranking** → Qwen3-Reranker scores candidates by relevance (→ top 4)
-6. **Response Generation** → LLM generates response based on reranked documents
-7. **Memory Storage** → Conversation state saved to PostgreSQL
-8. **Output** → Response sent to user with character-by-character streaming
+6. **Document Grading** → LLM evaluates each document's relevance to the query
+   - If documents fail grading, query is transformed and retrieval retries (max 2 iterations)
+7. **Response Generation** → LLM generates response based on graded documents
+8. **Response Grading** → LLM evaluates response quality (relevance, completeness, clarity)
+9. **Memory Storage** → Conversation state saved to PostgreSQL
+10. **Output** → Response sent to user with character-by-character streaming
 
 ## File Structure
 
 ```
 langchain_agent/
-├── main.py                    # Main agent entry point with Qwen3Reranker
+├── main.py                    # Main agent entry point with reflection loop
 ├── setup.py                   # Unified setup script (one command setup)
 ├── config.py                  # Configuration constants
 ├── requirements.txt           # Python dependencies
-├── test_reranker.py           # Cross-encoder reranker tests (6 comprehensive tests)
+├── test_reranker.py           # Cross-encoder reranker tests (6 tests)
 ├── test_hybrid_search.py      # Hybrid search strategy validation
 ├── test_query_evaluator.py    # Query evaluation & dynamic lambda testing
+├── test_reflection.py         # Reflection loop tests (6 tests)
 └── README.md                  # This file
 
 ../
@@ -401,6 +405,60 @@ To disable reranking and fall back to standard hybrid search:
 # In config.py
 ENABLE_RERANKING = False
 RERANKER_FETCH_K = 4  # Back to standard retrieval
+```
+
+### Reflection Configuration (Self-Improving Agent)
+
+The agent includes a reflection loop that grades retrieved documents and response quality, with automatic query transformation when retrieval fails.
+
+- **ENABLE_REFLECTION**: Master switch for reflection loop (default: `True`)
+- **ENABLE_DOCUMENT_GRADING**: Grade retrieved documents for relevance (default: `True`)
+- **ENABLE_RESPONSE_GRADING**: Evaluate final response quality (default: `True`)
+- **ENABLE_QUERY_TRANSFORMATION**: Rewrite query if documents are poor (default: `True`)
+- **REFLECTION_MAX_ITERATIONS**: Maximum retrieval attempts (default: `2`)
+- **REFLECTION_MIN_RELEVANT_DOCS**: Minimum relevant docs to pass grading (default: `2`)
+- **REFLECTION_DOC_SCORE_THRESHOLD**: Minimum average relevance score (default: `0.5`)
+- **REFLECTION_SHOW_STATUS**: Display reflection status in output (default: `True`)
+
+**How It Works:**
+```
+query_evaluator → agent → tools → document_grader
+                                       ↓
+                              (docs good?) → agent → response_grader → END
+                                       ↓
+                              (docs bad & can retry?) → query_transformer → retry
+```
+
+1. After retrieving documents, the **Document Grader** evaluates each document's relevance
+2. If documents fail grading (< 2 relevant docs or avg score < 0.5), the **Query Transformer** rewrites the query
+3. The agent retries with the transformed query (max 2 iterations)
+4. After generating a response, the **Response Grader** evaluates quality
+5. Reflection status is displayed in the console output
+
+**Example Output:**
+```
+[Document Grader] ✓ 3/4 documents relevant (avg score: 0.78)
+[Response Grader] ✓ PASS (score: 0.85)
+  Answer is comprehensive and addresses the query directly.
+```
+
+**Query Transformation Example:**
+```
+[Document Grader] ✗ 0/4 documents relevant (avg score: 0.15)
+[Reflection] Documents failed grading. Retry 1/2
+[Query Transformer] 'quantum basics' → 'introduction to quantum computing fundamentals'
+```
+
+**Performance Impact:**
+- Document grading: ~2-4s per query (LLM evaluates each document)
+- Response grading: ~1-2s per query
+- Query transformation (if triggered): ~1-2s
+- Total worst case (failed retrieval with retry): ~10s additional
+
+**Disabling Reflection:**
+```python
+# In config.py
+ENABLE_REFLECTION = False  # Disable all reflection features
 ```
 
 ### Advanced Features
@@ -647,6 +705,54 @@ Verify dynamic lambda adjustment based on query type classification:
 
 ```bash
 python test_query_evaluator.py
+```
+
+### Test Reflection Loop
+Verify document grading, response grading, and query transformation:
+
+```bash
+python test_reflection.py
+```
+
+Expected output:
+```
+======================================================================
+REFLECTION LOOP TESTS
+======================================================================
+
+Test 1: Configuration Loading
+  ENABLE_REFLECTION: True
+  ...
+✓ Configuration loaded successfully
+
+Test 2: State Type Definitions
+  ✓ CustomAgentState.iteration_count defined
+  ✓ CustomAgentState.document_grades defined
+  ...
+✓ State types defined correctly
+
+Test 3: Graph Creation with Reflection Nodes
+  Graph nodes: ['query_evaluator', 'agent', 'tools', 'document_grader',
+                'query_transformer', 'response_grader', ...]
+✓ Graph creation test passed
+
+Test 4: Document Grader Logic
+  [Document Grader] ✓ 1/3 documents relevant (avg score: 0.27)
+✓ Document grader test passed
+
+Test 5: Response Grader Logic
+  [Response Grader] ✓ PASS (score: 0.90)
+✓ Response grader test passed
+
+Test 6: Query Transformer Logic
+  [Query Transformer] 'quantum computing basics' → 'introduction to quantum computing fundamentals'
+✓ Query transformer test passed
+
+======================================================================
+TEST SUMMARY
+======================================================================
+  Total: 6/6 tests passed
+✓ All tests passed! Reflection loop is working correctly.
 ```
 
 ## Extending the Agent

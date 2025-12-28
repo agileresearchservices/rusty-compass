@@ -83,6 +83,16 @@ from config import (
     TOKEN_CHAR_RATIO,
     REASONING_ENABLED,
     REASONING_EFFORT,
+    # Reflection configuration
+    ENABLE_REFLECTION,
+    ENABLE_DOCUMENT_GRADING,
+    ENABLE_RESPONSE_GRADING,
+    ENABLE_QUERY_TRANSFORMATION,
+    REFLECTION_MAX_ITERATIONS,
+    REFLECTION_MIN_RELEVANT_DOCS,
+    REFLECTION_DOC_SCORE_THRESHOLD,
+    REFLECTION_RESPONSE_SCORE_THRESHOLD,
+    REFLECTION_SHOW_STATUS,
 )
 
 
@@ -231,16 +241,43 @@ class Qwen3Reranker:
 # STATE SCHEMA FOR CUSTOM AGENT GRAPH
 # ============================================================================
 
+class DocumentGrade(TypedDict):
+    """Grade for a single retrieved document"""
+    source: str
+    relevant: bool
+    score: float
+    reasoning: str
+
+
+class ReflectionResult(TypedDict):
+    """Result of a grading operation"""
+    grade: str  # "pass" or "fail"
+    score: float  # 0.0 - 1.0
+    reasoning: str  # Explanation
+
+
 class CustomAgentState(TypedDict):
     """
-    State schema for custom agent graph with dynamic lambda_mult.
+    State schema for custom agent graph with dynamic lambda_mult and reflection.
 
-    This extends the default agent state to include query analysis
-    and dynamic search parameter adjustment.
+    This extends the default agent state to include query analysis,
+    dynamic search parameter adjustment, and reflection loop state.
     """
+    # Core message state
     messages: Annotated[Sequence[BaseMessage], add_messages]
+
+    # Query evaluation state
     lambda_mult: float
     query_analysis: str
+
+    # Reflection state
+    iteration_count: int                          # Track retrieval iterations (0, 1, or 2)
+    retrieved_documents: List[Document]           # Raw documents from retrieval
+    document_grades: List[DocumentGrade]          # Individual document grades
+    document_grade_summary: ReflectionResult      # Overall document relevance
+    response_grade: ReflectionResult              # Quality of final response
+    original_query: str                           # Preserve original for transformation
+    transformed_query: Optional[str]              # Rewritten query if docs were poor
 
 
 # ============================================================================
@@ -929,11 +966,18 @@ Example response:
                     )
                 )
 
+                # Store retrieved documents for reflection grading
+                if ENABLE_REFLECTION and ENABLE_DOCUMENT_GRADING:
+                    return {
+                        "messages": tool_responses,
+                        "retrieved_documents": results
+                    }
+
         return {"messages": tool_responses}
 
     def should_continue(self, state: CustomAgentState) -> str:
         """
-        Determine whether to continue to tools or end.
+        Determine whether to continue to tools, response_grader, or end.
         """
         messages = state["messages"]
         last_message = messages[-1]
@@ -942,8 +986,299 @@ Example response:
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
             return "tools"
 
+        # If reflection is enabled, route to response grader
+        if ENABLE_REFLECTION and ENABLE_RESPONSE_GRADING:
+            return "response_grader"
+
         # Otherwise, end
         return "END"
+
+    def route_after_doc_grading(self, state: CustomAgentState) -> str:
+        """
+        Route after document grading: continue to agent or retry with transformed query.
+        """
+        # If reflection is disabled, always continue to agent
+        if not ENABLE_REFLECTION or not ENABLE_DOCUMENT_GRADING:
+            return "agent"
+
+        doc_summary = state.get("document_grade_summary", {})
+        iteration = state.get("iteration_count", 0)
+
+        # If docs are good, continue to agent
+        if doc_summary.get("grade") == "pass":
+            return "agent"
+
+        # If docs are bad but can retry (and query transformation is enabled)
+        if ENABLE_QUERY_TRANSFORMATION and iteration < REFLECTION_MAX_ITERATIONS:
+            print(f"[Reflection] Documents failed grading. Retry {iteration + 1}/{REFLECTION_MAX_ITERATIONS}")
+            return "query_transformer"
+
+        # Max iterations reached or query transformation disabled, continue anyway
+        if iteration >= REFLECTION_MAX_ITERATIONS:
+            print(f"[Reflection] Max iterations reached. Proceeding with available documents.")
+        return "agent"
+
+    # ========================================================================
+    # REFLECTION NODES
+    # ========================================================================
+
+    def document_grader_node(self, state: CustomAgentState) -> Dict[str, Any]:
+        """
+        Grade retrieved documents for relevance to the user query.
+
+        Uses LLM to evaluate each document and determine overall relevance.
+        """
+        if not ENABLE_REFLECTION or not ENABLE_DOCUMENT_GRADING:
+            return {}
+
+        retrieved_docs = state.get("retrieved_documents", [])
+
+        if not retrieved_docs:
+            return {
+                "document_grades": [],
+                "document_grade_summary": {
+                    "grade": "fail",
+                    "score": 0.0,
+                    "reasoning": "No documents retrieved"
+                }
+            }
+
+        # Extract the original query from messages
+        messages = state["messages"]
+        original_query = state.get("original_query", "")
+        if not original_query:
+            for msg in reversed(messages):
+                if isinstance(msg, HumanMessage):
+                    # Skip retry messages
+                    if not msg.content.startswith("[Retry with transformed query]"):
+                        original_query = msg.content
+                        break
+
+        # Grade each document
+        grades = []
+        for doc in retrieved_docs:
+            grade = self._grade_document(original_query, doc)
+            grades.append(grade)
+
+        # Compute summary
+        relevant_count = sum(1 for g in grades if g["relevant"])
+        avg_score = sum(g["score"] for g in grades) / len(grades) if grades else 0.0
+
+        # Pass if we have enough relevant documents
+        passed = relevant_count >= REFLECTION_MIN_RELEVANT_DOCS and avg_score >= REFLECTION_DOC_SCORE_THRESHOLD
+
+        summary = {
+            "grade": "pass" if passed else "fail",
+            "score": avg_score,
+            "reasoning": f"{relevant_count}/{len(grades)} documents relevant (avg score: {avg_score:.2f})"
+        }
+
+        if REFLECTION_SHOW_STATUS:
+            status_icon = "✓" if passed else "✗"
+            print(f"[Document Grader] {status_icon} {summary['reasoning']}")
+
+        return {
+            "document_grades": grades,
+            "document_grade_summary": summary,
+            "original_query": original_query
+        }
+
+    def query_transformer_node(self, state: CustomAgentState) -> Dict[str, Any]:
+        """
+        Transform/rewrite the query for better retrieval results.
+
+        Called when document grading fails and retry is allowed.
+        """
+        if not ENABLE_REFLECTION or not ENABLE_QUERY_TRANSFORMATION:
+            return {}
+
+        original_query = state.get("original_query", "")
+        document_grades = state.get("document_grades", [])
+
+        # Build context about what failed
+        failed_reasons = [
+            g["reasoning"] for g in document_grades if not g["relevant"]
+        ]
+
+        transform_prompt = f"""Rewrite this search query to improve document retrieval.
+
+Original Query: {original_query}
+
+The initial search returned documents that were not relevant because:
+{chr(10).join(f"- {r}" for r in failed_reasons[:3])}
+
+Write a new query that:
+1. Captures the same user intent
+2. Uses different keywords/synonyms
+3. Is more specific or more general as needed
+4. Focuses on core concepts
+
+Respond with ONLY the rewritten query, nothing else."""
+
+        try:
+            response = self.llm.invoke(transform_prompt)
+            transformed = response.content.strip()
+        except Exception as e:
+            print(f"[Query Transformer] Error: {e}")
+            transformed = original_query  # Fallback to original
+
+        if REFLECTION_SHOW_STATUS:
+            print(f"[Query Transformer] '{original_query}' → '{transformed}'")
+
+        # Increment iteration count
+        new_iteration = state.get("iteration_count", 0) + 1
+
+        # Create new user message with transformed query for retry
+        retry_message = HumanMessage(
+            content=f"[Retry with transformed query] {transformed}"
+        )
+
+        return {
+            "transformed_query": transformed,
+            "iteration_count": new_iteration,
+            "messages": [retry_message],
+            "lambda_mult": 0.5,  # Reset to balanced for retry
+            "retrieved_documents": [],  # Clear previous documents
+            "document_grades": [],
+            "document_grade_summary": {}
+        }
+
+    def response_grader_node(self, state: CustomAgentState) -> Dict[str, Any]:
+        """
+        Grade the quality of the agent's final response.
+
+        Evaluates relevance, completeness, and accuracy.
+        """
+        if not ENABLE_REFLECTION or not ENABLE_RESPONSE_GRADING:
+            return {}
+
+        messages = state["messages"]
+        original_query = state.get("original_query", "")
+
+        # Get the last AI response (non-tool-call)
+        last_response = None
+        for msg in reversed(messages):
+            if isinstance(msg, AIMessage) and msg.content:
+                if not (hasattr(msg, "tool_calls") and msg.tool_calls):
+                    last_response = msg.content
+                    break
+
+        if not last_response:
+            return {
+                "response_grade": {
+                    "grade": "fail",
+                    "score": 0.0,
+                    "reasoning": "No response generated"
+                }
+            }
+
+        # Get document context
+        doc_summary = state.get("document_grade_summary", {})
+
+        grade = self._grade_response(
+            query=original_query,
+            response=last_response,
+            doc_context=doc_summary
+        )
+
+        if REFLECTION_SHOW_STATUS:
+            status_icon = "✓" if grade["grade"] == "pass" else "✗"
+            print(f"[Response Grader] {status_icon} {grade['grade'].upper()} (score: {grade['score']:.2f})")
+            print(f"  {grade['reasoning']}")
+
+        return {"response_grade": grade}
+
+    def _grade_document(self, query: str, doc: Document) -> DocumentGrade:
+        """Grade a single document for relevance using LLM."""
+        source = doc.metadata.get("source", "unknown")
+        content_preview = doc.page_content[:500]
+
+        prompt = f"""Evaluate if this document is relevant to the user's query.
+
+USER QUERY: {query}
+
+DOCUMENT (from {source}):
+{content_preview}
+
+Evaluate:
+1. Does this document contain information that helps answer the query?
+2. Is the information directly relevant or only tangentially related?
+3. Would using this document improve the response quality?
+
+Respond with JSON only:
+{{"relevant": true, "score": 0.8, "reasoning": "brief explanation"}}
+
+Use these guidelines:
+- relevant: true if the document helps answer the query, false otherwise
+- score: 0.0-1.0 indicating relevance strength
+- reasoning: one sentence explanation"""
+
+        try:
+            response = self.llm.invoke(prompt)
+            result_text = response.content.strip()
+
+            # Try to parse JSON
+            result = json.loads(result_text)
+
+            return {
+                "source": source,
+                "relevant": bool(result.get("relevant", False)),
+                "score": float(result.get("score", 0.5)),
+                "reasoning": str(result.get("reasoning", "No reasoning"))
+            }
+        except Exception as e:
+            # Fallback: assume marginally relevant
+            logger.warning(f"Document grading failed for {source}: {e}")
+            return {
+                "source": source,
+                "relevant": True,
+                "score": 0.5,
+                "reasoning": f"Grading failed: {str(e)[:50]}"
+            }
+
+    def _grade_response(self, query: str, response: str, doc_context: dict) -> ReflectionResult:
+        """Grade the quality of the final response using LLM."""
+        prompt = f"""Evaluate the quality of this response to the user's query.
+
+USER QUERY: {query}
+
+RESPONSE:
+{response[:1000]}
+
+Evaluate on these criteria:
+1. RELEVANCE: Does the response directly address the query?
+2. COMPLETENESS: Does it provide a thorough answer?
+3. CLARITY: Is the response well-structured and easy to understand?
+
+Respond with JSON only:
+{{"grade": "pass", "score": 0.85, "reasoning": "brief explanation"}}
+
+Guidelines:
+- grade: "pass" if response reasonably answers the query, "fail" if clearly wrong/irrelevant/incomplete
+- score: 0.0-1.0 indicating quality
+- reasoning: one sentence explanation
+
+Only FAIL responses that are clearly wrong, irrelevant, or too incomplete to be useful."""
+
+        try:
+            result = self.llm.invoke(prompt)
+            result_text = result.content.strip()
+
+            parsed = json.loads(result_text)
+
+            return {
+                "grade": str(parsed.get("grade", "pass")),
+                "score": float(parsed.get("score", 0.7)),
+                "reasoning": str(parsed.get("reasoning", "No reasoning"))
+            }
+        except Exception as e:
+            # Fallback: assume acceptable
+            logger.warning(f"Response grading failed: {e}")
+            return {
+                "grade": "pass",
+                "score": 0.7,
+                "reasoning": f"Grading failed: {str(e)[:50]}"
+            }
 
     def create_agent_graph(self):
         """Create custom StateGraph with query evaluation for dynamic lambda_mult"""
@@ -975,30 +1310,80 @@ Example response:
         # Build the graph
         workflow = StateGraph(CustomAgentState)
 
-        # Add nodes
+        # Add core nodes
         workflow.add_node("query_evaluator", self.query_evaluator_node)
         workflow.add_node("agent", self.agent_node)
         workflow.add_node("tools", self.tools_node)
+
+        # Add reflection nodes (if enabled)
+        if ENABLE_REFLECTION:
+            if ENABLE_DOCUMENT_GRADING:
+                workflow.add_node("document_grader", self.document_grader_node)
+            if ENABLE_QUERY_TRANSFORMATION:
+                workflow.add_node("query_transformer", self.query_transformer_node)
+            if ENABLE_RESPONSE_GRADING:
+                workflow.add_node("response_grader", self.response_grader_node)
 
         # Set entry point
         workflow.set_entry_point("query_evaluator")
 
         # Add edges
         workflow.add_edge("query_evaluator", "agent")
-        workflow.add_conditional_edges(
-            "agent",
-            self.should_continue,
-            {
-                "tools": "tools",
-                "END": END
-            }
-        )
-        workflow.add_edge("tools", "agent")
+
+        # Agent routing: tools, response_grader, or END
+        if ENABLE_REFLECTION and ENABLE_RESPONSE_GRADING:
+            workflow.add_conditional_edges(
+                "agent",
+                self.should_continue,
+                {
+                    "tools": "tools",
+                    "response_grader": "response_grader",
+                    "END": END
+                }
+            )
+            # Response grader -> END
+            workflow.add_edge("response_grader", END)
+        else:
+            workflow.add_conditional_edges(
+                "agent",
+                self.should_continue,
+                {
+                    "tools": "tools",
+                    "END": END
+                }
+            )
+
+        # Tools routing with document grading
+        if ENABLE_REFLECTION and ENABLE_DOCUMENT_GRADING:
+            # Tools -> Document Grader
+            workflow.add_edge("tools", "document_grader")
+
+            # Document Grader routing
+            if ENABLE_QUERY_TRANSFORMATION:
+                workflow.add_conditional_edges(
+                    "document_grader",
+                    self.route_after_doc_grading,
+                    {
+                        "agent": "agent",
+                        "query_transformer": "query_transformer"
+                    }
+                )
+                # Query Transformer -> Query Evaluator (for retry)
+                workflow.add_edge("query_transformer", "query_evaluator")
+            else:
+                # No query transformation, always go to agent
+                workflow.add_edge("document_grader", "agent")
+        else:
+            # No document grading, tools -> agent directly
+            workflow.add_edge("tools", "agent")
 
         # Compile with checkpointer
         self.app = workflow.compile(checkpointer=self.checkpointer)
 
-        print("✓ Custom agent graph created with query evaluator")
+        if ENABLE_REFLECTION:
+            print("✓ Custom agent graph created with query evaluator + reflection")
+        else:
+            print("✓ Custom agent graph created with query evaluator")
         print()
 
     def generate_thread_id(self):
@@ -1299,7 +1684,15 @@ Summary:"""
             input_data = {
                 "messages": [("user", user_input)],
                 "lambda_mult": 0.25,  # Default, will be overridden by query_evaluator
-                "query_analysis": ""
+                "query_analysis": "",
+                # Reflection state initialization
+                "iteration_count": 0,
+                "retrieved_documents": [],
+                "document_grades": [],
+                "document_grade_summary": {},
+                "response_grade": {},
+                "original_query": user_input,
+                "transformed_query": None,
             }
 
             # Try to apply compaction to conversation if needed

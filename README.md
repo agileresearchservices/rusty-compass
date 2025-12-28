@@ -56,10 +56,16 @@ flowchart TB
         end
 
         subgraph LangGraph["LangGraph ReAct Agent"]
-            STATE["CustomAgentState<br/>messages, lambda_mult,<br/>query_analysis"]
+            STATE["CustomAgentState<br/>messages, lambda_mult,<br/>iteration_count, document_grades"]
             REACT["ReAct Loop<br/>(Reason, Act, Observe)"]
             TOOLS["Tools"]
             CHECKPOINT["PostgresSaver<br/>(Persistence)"]
+        end
+
+        subgraph Reflection["Reflection Loop"]
+            DOC_GRADER["Document Grader<br/>(Grade relevance)"]
+            QUERY_TRANS["Query Transformer<br/>(Rewrite on failure)"]
+            RESP_GRADER["Response Grader<br/>(Evaluate quality)"]
         end
 
         subgraph KBTool["Knowledge Base Tool"]
@@ -119,11 +125,17 @@ flowchart TB
     RRF --> |"15 candidates"| RERANKER
     RERANKER --> RERANK
     RERANK --> |"Scored docs"| RERANKER
-    RERANKER --> |"Top 4 docs"| REACT
+    RERANKER --> |"Top 4 docs"| DOC_GRADER
+
+    %% Reflection Flow
+    DOC_GRADER --> |"Docs pass"| REACT
+    DOC_GRADER --> |"Docs fail"| QUERY_TRANS
+    QUERY_TRANS --> |"Retry"| QueryEval
 
     %% LLM Reasoning
     REACT --> |"Generate Response"| LLM
-    LLM --> |"Streamed tokens"| STREAM
+    LLM --> |"Final response"| RESP_GRADER
+    RESP_GRADER --> |"Streamed tokens"| STREAM
     STREAM --> CLI
 
     %% Persistence
@@ -174,14 +186,15 @@ That's it! The `setup.py` script handles:
 
 ## Features
 
-✅ **7-Step Setup** - Automated initialization (`python setup.py`)  
-✅ **Real-Time Streaming** - Thinking + responses stream character-by-character  
-✅ **Hybrid Search** - Vector + full-text with RRF fusion  
-✅ **Cross-Encoder Reranking** - Qwen3-Reranker-8B scores document relevance  
-✅ **Query Evaluation** - Dynamic lambda adjustment based on query type  
-✅ **Persistent Memory** - Multi-turn conversations with context preservation  
-✅ **Conversation Management** - Create, list, load, clear conversations  
-✅ **Local Only** - All data stays on your machine  
+✅ **7-Step Setup** - Automated initialization (`python setup.py`)
+✅ **Real-Time Streaming** - Thinking + responses stream character-by-character
+✅ **Hybrid Search** - Vector + full-text with RRF fusion
+✅ **Cross-Encoder Reranking** - Qwen3-Reranker-8B scores document relevance
+✅ **Reflection Loop** - Document grading, query transformation, response grading
+✅ **Query Evaluation** - Dynamic lambda adjustment based on query type
+✅ **Persistent Memory** - Multi-turn conversations with context preservation
+✅ **Conversation Management** - Create, list, load, clear conversations
+✅ **Local Only** - All data stays on your machine
 ✅ **Fully Documented** - Setup, User, and Developer guides included  
 
 ## Example Queries
@@ -245,4 +258,4 @@ For more details, see [README.md](langchain_agent/README.md).
 ---
 
 **Status**: Production Ready ✓
-**Last Updated**: 2025-12-26
+**Last Updated**: 2025-12-28
