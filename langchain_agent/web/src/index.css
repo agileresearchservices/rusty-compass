@@ -82,19 +82,43 @@
 
   /* Markdown rendering */
   .markdown-content {
-    @apply prose prose-invert prose-sm max-w-none;
+    @apply text-gray-100 leading-relaxed;
+  }
+
+  .markdown-content p {
+    @apply mb-3;
+  }
+
+  .markdown-content h1, .markdown-content h2, .markdown-content h3 {
+    @apply font-semibold text-white mb-2 mt-4;
   }
 
   .markdown-content pre {
-    @apply bg-gray-900 rounded-lg p-4 overflow-x-auto;
+    @apply bg-gray-900 rounded-lg p-4 overflow-x-auto my-3;
   }
 
   .markdown-content code {
-    @apply bg-gray-800 px-1 py-0.5 rounded text-sm;
+    @apply bg-gray-700 px-1.5 py-0.5 rounded text-sm text-gray-200;
   }
 
   .markdown-content pre code {
     @apply bg-transparent p-0;
+  }
+
+  .markdown-content ul, .markdown-content ol {
+    @apply pl-5 mb-3;
+  }
+
+  .markdown-content li {
+    @apply mb-1;
+  }
+
+  .markdown-content a {
+    @apply text-blue-400 hover:underline;
+  }
+
+  .markdown-content blockquote {
+    @apply border-l-4 border-gray-600 pl-4 italic text-gray-400;
   }
 
   /* Pulse animation for active nodes */
@@ -120,4 +144,37 @@
 
 .react-flow__handle {
   @apply bg-gray-500;
+}
+
+/* React Flow container must have explicit dimensions */
+.react-flow {
+  width: 100%;
+  height: 100%;
+}
+
+/* React Flow controls styling */
+.react-flow__controls {
+  @apply bg-gray-800 border border-gray-700 rounded-lg;
+}
+
+.react-flow__controls-button {
+  @apply bg-gray-800 border-gray-700 text-gray-300;
+}
+
+.react-flow__controls-button:hover {
+  @apply bg-gray-700;
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+/* React Flow background */
+.react-flow__background pattern {
+  @apply stroke-gray-700;
+}
+
+/* React Flow attribution */
+.react-flow__attribution {
+  @apply hidden;
 }

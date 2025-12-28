@@ -29,6 +29,11 @@ interface ChatState {
   isProcessing: boolean
   streamingContent: string
 
+  // WebSocket state
+  isConnected: boolean
+  isConnecting: boolean
+  connectionError: string | null
+
   // Conversation list
   conversations: ConversationSummary[]
   conversationsLoading: boolean
@@ -45,6 +50,7 @@ interface ChatState {
   setConversations: (conversations: ConversationSummary[]) => void
   setConversationsLoading: (loading: boolean) => void
   startNewConversation: () => void
+  setConnectionState: (connected: boolean, connecting: boolean, error: string | null) => void
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -53,6 +59,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   isProcessing: false,
   streamingContent: '',
+  isConnected: false,
+  isConnecting: false,
+  connectionError: null,
   conversations: [],
   conversationsLoading: false,
 
@@ -129,4 +138,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isProcessing: false,
     })
   },
+
+  setConnectionState: (connected, connecting, error) => set({
+    isConnected: connected,
+    isConnecting: connecting,
+    connectionError: error,
+  }),
 }))

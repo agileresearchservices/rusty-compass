@@ -3,10 +3,14 @@
  * Handles connection, message sending, and event processing.
  */
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef } from 'react'
 import { useChatStore, type ChatMessage } from '../stores/chatStore'
 import { useObservabilityStore } from '../stores/observabilityStore'
 import type { AgentEvent, NodeName } from '../types/events'
+
+// Singleton WebSocket instance
+let wsInstance: WebSocket | null = null
+let currentThreadId: string | null = null
 
 interface UseWebSocketReturn {
   isConnected: boolean
@@ -18,11 +22,8 @@ interface UseWebSocketReturn {
 }
 
 export function useWebSocket(): UseWebSocketReturn {
-  const [isConnected, setIsConnected] = useState(false)
-  const [isConnecting, setIsConnecting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { isConnected, isConnecting, connectionError, setConnectionState } = useChatStore()
 
-  const wsRef = useRef<WebSocket | null>(null)
   const threadIdRef = useRef<string | null>(null)
 
   // Chat store actions
@@ -32,21 +33,14 @@ export function useWebSocket(): UseWebSocketReturn {
     setStreamingContent,
     appendStreamingContent,
     finalizeStreaming,
-  } = useChatStore()
-
-  // Observability store actions
-  const {
-    startExecution,
-    endExecution,
-    addEvent,
-    startNode,
-    endNode,
-    clearState,
-  } = useObservabilityStore()
+  } = useChatStore.getState()
 
   const handleMessage = useCallback((data: AgentEvent) => {
+    const chatStore = useChatStore.getState()
+    const obsStore = useObservabilityStore.getState()
+
     // Add event to observability store
-    addEvent(data)
+    obsStore.addEvent(data)
 
     switch (data.type) {
       case 'connection_established':
@@ -54,82 +48,79 @@ export function useWebSocket(): UseWebSocketReturn {
         break
 
       case 'node_start':
-        startNode(data.node as NodeName, data.input_summary)
+        obsStore.startNode(data.node as NodeName, data.input_summary)
         break
 
       case 'node_end':
-        endNode(data.node as NodeName, data.duration_ms, data.output_summary)
+        obsStore.endNode(data.node as NodeName, data.duration_ms, data.output_summary)
         break
 
       case 'llm_response_start':
         // Start streaming - add placeholder assistant message
-        addMessage({
+        chatStore.addMessage({
           id: `msg-${Date.now()}`,
           role: 'assistant',
           content: '',
           timestamp: new Date(),
           isStreaming: true,
         })
-        setStreamingContent('')
+        chatStore.setStreamingContent('')
         break
 
       case 'llm_response_chunk':
         if (data.content) {
-          appendStreamingContent(data.content)
+          chatStore.appendStreamingContent(data.content)
         }
         break
 
       case 'agent_complete':
         // Finalize the streaming message with the complete response
         if (data.final_response) {
-          setStreamingContent(data.final_response)
+          chatStore.setStreamingContent(data.final_response)
         }
-        finalizeStreaming()
-        endExecution()
+        chatStore.finalizeStreaming()
+        obsStore.endExecution()
         break
 
       case 'agent_error':
         console.error('Agent error:', data.error)
-        setError(data.error)
-        finalizeStreaming()
-        endExecution()
+        chatStore.setConnectionState(false, false, data.error)
+        chatStore.finalizeStreaming()
+        obsStore.endExecution()
         break
 
       default:
         // Other events are handled by addEvent above
         break
     }
-  }, [
-    addEvent,
-    startNode,
-    endNode,
-    addMessage,
-    setStreamingContent,
-    appendStreamingContent,
-    finalizeStreaming,
-    endExecution,
-    setError,
-  ])
+  }, [])
 
   const connect = useCallback((threadId: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    // If already connected to this thread, do nothing
+    if (wsInstance?.readyState === WebSocket.OPEN && currentThreadId === threadId) {
       return
     }
 
-    setIsConnecting(true)
-    setError(null)
+    // Close existing connection if any
+    if (wsInstance) {
+      wsInstance.close()
+      wsInstance = null
+    }
+
+    setConnectionState(false, true, null)
     threadIdRef.current = threadId
+    currentThreadId = threadId
 
     // Build WebSocket URL
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
     const url = `${protocol}//${host}/ws/chat?thread_id=${threadId}`
 
+    console.log('Connecting to WebSocket:', url)
     const ws = new WebSocket(url)
 
     ws.onopen = () => {
-      setIsConnected(true)
-      setIsConnecting(false)
+      setConnectionState(true, false, null)
       console.log('WebSocket connected')
     }
 
@@ -144,31 +135,31 @@ export function useWebSocket(): UseWebSocketReturn {
 
     ws.onerror = (event) => {
       console.error('WebSocket error:', event)
-      setError('WebSocket connection error')
-      setIsConnecting(false)
+      setConnectionState(false, false, 'WebSocket connection error')
     }
 
     ws.onclose = () => {
-      setIsConnected(false)
-      setIsConnecting(false)
+      setConnectionState(false, false, null)
+      wsInstance = null
       console.log('WebSocket disconnected')
     }
 
-    wsRef.current = ws
-  }, [handleMessage])
+    wsInstance = ws
+  }, [handleMessage, setConnectionState])
 
   const disconnect = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close()
-      wsRef.current = null
+    if (wsInstance) {
+      wsInstance.close()
+      wsInstance = null
     }
     threadIdRef.current = null
-    setIsConnected(false)
-  }, [])
+    currentThreadId = null
+    setConnectionState(false, false, null)
+  }, [setConnectionState])
 
   const sendMessage = useCallback((message: string) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      setError('WebSocket not connected')
+    if (!wsInstance || wsInstance.readyState !== WebSocket.OPEN) {
+      setConnectionState(false, false, 'WebSocket not connected')
       return
     }
 
@@ -179,29 +170,29 @@ export function useWebSocket(): UseWebSocketReturn {
       content: message,
       timestamp: new Date(),
     }
-    addMessage(userMessage)
+    useChatStore.getState().addMessage(userMessage)
 
     // Set processing state
-    setIsProcessing(true)
+    useChatStore.getState().setIsProcessing(true)
 
     // Clear previous observability state and start new execution
-    clearState()
-    startExecution()
+    useObservabilityStore.getState().clearState()
+    useObservabilityStore.getState().startExecution()
 
     // Send message over WebSocket
     const payload = {
       type: 'chat_message',
       message,
-      thread_id: threadIdRef.current,
+      thread_id: currentThreadId,
     }
 
-    wsRef.current.send(JSON.stringify(payload))
-  }, [addMessage, setIsProcessing, clearState, startExecution])
+    wsInstance.send(JSON.stringify(payload))
+  }, [setConnectionState])
 
   return {
     isConnected,
     isConnecting,
-    error,
+    error: connectionError,
     connect,
     disconnect,
     sendMessage,

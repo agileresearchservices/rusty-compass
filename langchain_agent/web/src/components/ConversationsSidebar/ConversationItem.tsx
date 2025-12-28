@@ -63,10 +63,10 @@ export function ConversationItem({ conversation, isActive }: ConversationItemPro
   }
 
   return (
-    <button
+    <div
       onClick={handleSelect}
       className={clsx(
-        'w-full flex items-start gap-2 px-3 py-2 rounded-lg text-left transition-colors group',
+        'w-full flex items-start gap-2 px-3 py-2 rounded-lg text-left transition-colors group cursor-pointer',
         isActive
           ? 'bg-gray-800 text-white'
           : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'
@@ -91,6 +91,6 @@ export function ConversationItem({ conversation, isActive }: ConversationItemPro
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>
-    </button>
+    </div>
   )
 }

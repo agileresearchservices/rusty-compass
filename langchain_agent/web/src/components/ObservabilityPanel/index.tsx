@@ -58,9 +58,13 @@ export function ObservabilityPanel() {
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden relative" style={{ minHeight: '400px' }}>
         {activeTab === 'steps' && <StepsList />}
-        {activeTab === 'graph' && <AgentGraph />}
+        {activeTab === 'graph' && (
+          <div className="absolute inset-0">
+            <AgentGraph />
+          </div>
+        )}
         {activeTab === 'metrics' && <MetricsView />}
       </div>
 

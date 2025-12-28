@@ -10,8 +10,8 @@ import clsx from 'clsx'
 
 export function MessageInput() {
   const [message, setMessage] = useState('')
-  const { sendMessage, isConnected } = useWebSocket()
-  const { isProcessing } = useChatStore()
+  const { sendMessage } = useWebSocket()
+  const { isProcessing, isConnected } = useChatStore()
 
   const handleSubmit = useCallback(() => {
     const trimmed = message.trim()

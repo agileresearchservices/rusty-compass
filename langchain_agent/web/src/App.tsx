@@ -4,8 +4,9 @@ import { useChatStore } from './stores/chatStore'
 import { useWebSocket } from './hooks/useWebSocket'
 
 function App() {
-  const { threadId, setThreadId } = useChatStore()
-  const { connect, disconnect, isConnected } = useWebSocket()
+  const threadId = useChatStore((s) => s.threadId)
+  const setThreadId = useChatStore((s) => s.setThreadId)
+  const { connect } = useWebSocket()
 
   // Generate initial thread ID if needed
   useEffect(() => {
@@ -15,16 +16,16 @@ function App() {
     }
   }, [threadId, setThreadId])
 
-  // Connect WebSocket when thread ID is available
+  // Connect WebSocket when thread ID changes
   useEffect(() => {
-    if (threadId && !isConnected) {
-      connect(threadId)
+    if (threadId) {
+      // Small delay to let previous connection close
+      const timer = setTimeout(() => {
+        connect(threadId)
+      }, 100)
+      return () => clearTimeout(timer)
     }
-
-    return () => {
-      disconnect()
-    }
-  }, [threadId, connect, disconnect, isConnected])
+  }, [threadId, connect])
 
   return <Layout />
 }

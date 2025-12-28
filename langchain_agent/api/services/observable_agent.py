@@ -211,44 +211,67 @@ class ObservableAgentService:
         loop = asyncio.get_event_loop()
 
         # Use the compiled app's stream method
-        # We need to run this synchronously and emit events
-        def run_sync():
+        # Track timestamps for each node execution during synchronous execution
+        def run_sync_with_timing():
             results = []
+            # List of (node_name, start_time, end_time, output) for each execution
+            node_executions: List[Dict[str, Any]] = []
+            prev_time = time.time()
+
             for event in self._agent.app.stream(initial_state, config):
-                results.append(event)
-            return results
+                current_time = time.time()
+
+                # Each event is a dict with node_name: output_dict
+                for node_name, output in event.items():
+                    # Record this execution with timing
+                    node_executions.append({
+                        "node": node_name,
+                        "start": prev_time,
+                        "end": current_time,
+                        "output": output,
+                    })
+                    prev_time = current_time
+
+            return node_executions
 
         # Run the graph
-        events = await loop.run_in_executor(None, run_sync)
+        node_executions = await loop.run_in_executor(None, run_sync_with_timing)
 
         # Process events and emit observability data
-        for event in events:
-            # Each event is a dict with node_name: output_dict
-            for node_name, output in event.items():
-                # Emit node start
-                node_start = time.time()
-                node_start_times[node_name] = node_start
+        for execution in node_executions:
+            node_name = execution["node"]
+            output = execution["output"]
+            start_time = execution["start"]
+            end_time = execution["end"]
 
-                await emit(NodeStartEvent(
-                    node=node_name,
-                    input_summary=self._summarize_input(node_name, output),
-                ))
+            # Calculate duration
+            duration_ms = max((end_time - start_time) * 1000, 1.0)  # At least 1ms
 
-                # Emit node-specific events
-                await self._emit_node_events(node_name, output, emit)
-
-                # Calculate duration
-                duration_ms = (time.time() - node_start) * 1000
+            # Store for metrics (accumulate for repeated nodes)
+            if node_name not in node_start_times:
+                node_start_times[node_name] = start_time
+            if node_name in metrics:
+                metrics[node_name] += duration_ms
+            else:
                 metrics[node_name] = duration_ms
 
-                # Emit node end
-                await emit(NodeEndEvent(
-                    node=node_name,
-                    duration_ms=duration_ms,
-                    output_summary=self._summarize_output(node_name, output),
-                ))
+            # Emit node start
+            await emit(NodeStartEvent(
+                node=node_name,
+                input_summary=self._summarize_input(node_name, output),
+            ))
 
-                yield output
+            # Emit node-specific events
+            await self._emit_node_events(node_name, output, emit)
+
+            # Emit node end with actual duration
+            await emit(NodeEndEvent(
+                node=node_name,
+                duration_ms=duration_ms,
+                output_summary=self._summarize_output(node_name, output),
+            ))
+
+            yield output
 
     async def _emit_node_events(
         self,
@@ -422,16 +445,15 @@ class ObservableAgentService:
         """Generate and save a conversation title."""
         try:
             loop = asyncio.get_event_loop()
-            title = await loop.run_in_executor(
+            # update_conversation_title() uses the internally set thread_id
+            # and handles both generation and database update
+            await loop.run_in_executor(
                 None,
-                lambda: self._agent.generate_conversation_title(thread_id)
+                self._agent.update_conversation_title
             )
-            if title:
-                await loop.run_in_executor(
-                    None,
-                    lambda: self._agent.update_conversation_title(thread_id, title)
-                )
-            return title
+            # Return a generated title from the user message for the WebSocket event
+            # (the actual title is saved to DB by update_conversation_title)
+            return user_message[:50].strip() if user_message else None
         except Exception as e:
             print(f"Error generating title: {e}")
             return None
