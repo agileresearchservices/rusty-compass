@@ -209,3 +209,5 @@ langchain_agent/chroma_db/chroma.sqlite3
 
 # Claude Code
 .claude/
+langchain_agent/.claude/
+CLAUDE.md
