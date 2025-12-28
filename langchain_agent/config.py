@@ -49,6 +49,10 @@ __all__ = [
     # Project paths
     "BASE_DIR",
     "SAMPLE_DOCS_DIR",
+    # LangChain documentation source
+    "DOCS_REPO_URL",
+    "DOCS_CACHE_DIR",
+    "DOCS_SOURCE_DIRS",
     # Sample data
     "DEFAULT_THREAD_ID",
     # Conversation compaction
@@ -121,7 +125,8 @@ VECTOR_INDEX_TYPE = "ivfflat"
 VECTOR_SIMILARITY_METRIC = "cosine"
 
 # Collection name for vector storage
-VECTOR_COLLECTION_NAME = "local_knowledge"
+# Use "langchain_docs" for LangChain documentation, "local_knowledge" for sample docs
+VECTOR_COLLECTION_NAME = "langchain_docs"
 
 # ============================================================================
 # RETRIEVER CONFIGURATION
@@ -197,6 +202,19 @@ REASONING_EFFORT = "low"  # Options: "low", "medium", "high"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SAMPLE_DOCS_DIR = os.path.join(os.path.dirname(BASE_DIR), "sample_docs")
+
+# ============================================================================
+# LANGCHAIN DOCUMENTATION SOURCE
+# ============================================================================
+
+# GitHub repository containing LangChain/LangGraph/LangSmith documentation
+DOCS_REPO_URL = "https://github.com/langchain-ai/docs.git"
+
+# Local cache directory for cloned documentation (outside langchain_agent/)
+DOCS_CACHE_DIR = os.path.join(os.path.dirname(BASE_DIR), ".langchain_docs_cache")
+
+# Source directories within the docs repo to process
+DOCS_SOURCE_DIRS = ["src/oss", "src/langsmith"]
 
 # ============================================================================
 # SAMPLE DATA

@@ -211,3 +211,6 @@ langchain_agent/chroma_db/chroma.sqlite3
 .claude/
 langchain_agent/.claude/
 CLAUDE.md
+
+# LangChain documentation cache (cloned repo)
+.langchain_docs_cache/

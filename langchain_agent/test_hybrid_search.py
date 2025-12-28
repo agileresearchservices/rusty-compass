@@ -45,45 +45,45 @@ def test_search_methods():
     # Lambda interpretation: 0.0=pure lexical, 1.0=pure semantic
     test_queries = [
         # ===== Pure Lexical Queries (0.0-0.2) =====
-        ("GPT-4 released in 2023", "Date + model number"),
-        ("Model XR-2500 specifications", "Part number"),
-        ("Intel Core i9-13900K specifications", "Product model specs"),
-        ("RTX 4090 release date 2022", "Product + date"),
-        ("SKU-XR-2500-A1 product manual", "Part number reference"),
-        ("iPhone 15 Pro Max camera specs", "Device model details"),
-        ("Google Pixel 8 Pro battery capacity mAh", "Device specs with unit"),
-        ("Model RTX-3080-Ti VRAM 12GB", "Product identifier + specs"),
+        ("LangChain 0.3.0 release notes", "Version + release"),
+        ("langchain-openai package version", "Package version"),
+        ("ChatOpenAI model_name parameter", "API parameter"),
+        ("LangGraph StateGraph import", "Import statement"),
+        ("LangSmith API key configuration", "Config parameter"),
+        ("OPENAI_API_KEY environment variable", "Environment variable"),
+        ("langchain_core.messages HumanMessage", "Module path"),
+        ("RunnablePassthrough class reference", "Class reference"),
 
         # ===== Lexical-Heavy Queries (0.2-0.4) =====
-        ("Django 4.2 authentication", "Version-specific"),
-        ("Python 3.11 new features", "Version-specific features"),
-        ("TensorFlow 2.13 API changes", "Library version updates"),
-        ("Kubernetes 1.28 installation guide", "Tool version documentation"),
-        ("Node.js version 20.5 release notes", "Runtime version info"),
-        ("AWS Lambda pricing model 2024", "Service + date identifier"),
+        ("LangGraph checkpointer PostgreSQL", "Feature + technology"),
+        ("LangChain LCEL pipe operator", "Framework syntax"),
+        ("LangSmith tracing setup", "Tool configuration"),
+        ("ChatPromptTemplate from_messages", "API method"),
+        ("StructuredOutputParser JSON schema", "Parser configuration"),
+        ("LangChain document loader PDF", "Loader type"),
 
         # ===== Balanced Queries (0.4-0.6) =====
-        ("MySQL 8.0 performance tuning", "Database version + optimization"),
-        ("Python Flask REST API tutorial", "Balanced"),
-        ("React hooks best practices", "Framework + technique"),
-        ("Docker containerization guide", "Tool + process"),
-        ("Express.js middleware configuration", "Framework + concept"),
+        ("LangGraph state management patterns", "Framework + patterns"),
+        ("LangChain retriever with reranking", "Feature + technique"),
+        ("LangSmith evaluation dataset creation", "Tool + process"),
+        ("RAG pipeline with LangChain", "Architecture + framework"),
+        ("LangGraph human-in-the-loop workflow", "Framework + concept"),
 
         # ===== Semantic-Heavy Queries (0.6-0.9) =====
-        ("Java Spring Boot microservices architecture", "Framework + architecture"),
-        ("PostgreSQL query optimization techniques", "Database + method"),
-        ("REST API design patterns", "Architecture + pattern"),
-        ("Vue.js framework comparison", "Framework discussion"),
+        ("How to build multi-agent systems with LangGraph", "Architecture question"),
+        ("Best practices for LangChain memory management", "Best practices"),
+        ("LangSmith debugging and observability strategies", "Strategies"),
+        ("Comparing LangChain vs LangGraph for agents", "Comparison"),
 
         # ===== Pure Semantic Queries (0.8-1.0) =====
-        ("What is machine learning?", "Semantic/conceptual"),
-        ("Explain how neural networks learn", "Conceptual/educational"),
-        ("What is the difference between supervised and unsupervised learning?", "Conceptual comparison"),
-        ("Describe the concept of overfitting in machine learning", "Conceptual explanation"),
-        ("What is object-oriented programming?", "Programming paradigm"),
-        ("Explain recursion in computer science", "Algorithm concept"),
-        ("How do I learn Python programming?", "Educational question"),
-        ("What are design patterns?", "Software design concept"),
+        ("What is LangGraph?", "Semantic/conceptual"),
+        ("Explain how LangChain agents work", "Conceptual/educational"),
+        ("What is the difference between chains and agents?", "Conceptual comparison"),
+        ("Describe the concept of tool calling in LangChain", "Conceptual explanation"),
+        ("What is retrieval augmented generation?", "RAG concept"),
+        ("How does LangSmith help with LLM development?", "Tool purpose"),
+        ("How do I get started with LangChain?", "Educational question"),
+        ("What are the benefits of using LangGraph?", "Benefits question"),
     ]
 
     for query, description in test_queries:
