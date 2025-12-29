@@ -225,14 +225,16 @@ class ObservableAgentService:
         """
         if self._use_async_streaming:
             # IMPROVED STREAMING MODE: Emit events incrementally as they occur
-            await self._astream_graph_improved(
+            async for output in self._astream_graph_improved(
                 initial_state, config, emit, node_start_times, metrics
-            )
+            ):
+                yield output
         else:
             # BACKWARD COMPATIBLE MODE: Collect all results, then emit
-            await self._astream_graph_legacy(
+            async for output in self._astream_graph_legacy(
                 initial_state, config, emit, node_start_times, metrics
-            )
+            ):
+                yield output
 
     async def _astream_graph_legacy(
         self,
