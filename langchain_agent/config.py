@@ -75,6 +75,7 @@ __all__ = [
     "REFLECTION_RESPONSE_SCORE_THRESHOLD",
     "REFLECTION_SHOW_STATUS",
     "DOCUMENT_GRADING_BATCH_SIZE",
+    "DOCUMENT_GRADING_CONFIDENCE_THRESHOLD",
     # Token budget tracking
     "REFLECTION_MAX_TOKENS_TOTAL",
     "REFLECTION_TOKEN_WARNING_THRESHOLD",
@@ -169,10 +170,10 @@ ENABLE_RERANKING = True
 #   - "BAAI/bge-reranker-v2-large" (more accurate but slower)
 #   - "Qwen/Qwen3-Reranker-8B" (multilingual, state-of-the-art)
 #   - "Qwen/Qwen3-Reranker-4B" (faster, smaller)
-RERANKER_MODEL = "Qwen/Qwen3-Reranker-8B"
+RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
 # Number of candidates to fetch before reranking
-RERANKER_FETCH_K = 15
+RERANKER_FETCH_K = 8
 
 # Final number of documents to return after reranking
 RERANKER_TOP_K = 4
@@ -291,6 +292,11 @@ REFLECTION_SHOW_STATUS = True
 # If more documents than this, they will be processed in batches
 # Set to 1 to disable batch grading and grade documents individually
 DOCUMENT_GRADING_BATCH_SIZE = 5
+
+# Skip document grading (skip LLM calls) if average reranker confidence exceeds this threshold
+# High reranker scores (>0.95) already indicate relevance, making LLM grading redundant
+# Set to 1.0 to always grade, 0.0 to never grade (optimization: ~6s savings on 60% of queries)
+DOCUMENT_GRADING_CONFIDENCE_THRESHOLD = 0.95
 
 # ============================================================================
 # TOKEN BUDGET TRACKING (Prevent Runaway Costs)

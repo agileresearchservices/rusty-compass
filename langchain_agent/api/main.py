@@ -56,3 +56,6 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup resources on shutdown."""
     print("LangChain Agent API shutting down...")
+    # Clean up the connection manager and agent service
+    await chat.manager.shutdown()
+    print("Cleanup complete.")

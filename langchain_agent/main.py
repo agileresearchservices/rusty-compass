@@ -1243,10 +1243,27 @@ Reasoning: {query_analysis}"""
 
                 # Store retrieved documents for reflection grading
                 if ENABLE_REFLECTION and ENABLE_DOCUMENT_GRADING:
-                    return {
+                    result_dict = {
                         "messages": tool_responses,
                         "retrieved_documents": results
                     }
+
+                    # Optimization: Skip LLM document grading if reranker confidence is high
+                    # High reranker scores (>0.95) already indicate relevance
+                    if ENABLE_RERANKING and results_with_scores:
+                        from config import DOCUMENT_GRADING_CONFIDENCE_THRESHOLD
+                        avg_reranker_score = sum(score for _, score in results_with_scores) / len(results_with_scores)
+
+                        if avg_reranker_score >= DOCUMENT_GRADING_CONFIDENCE_THRESHOLD:
+                            print(f"[Document Grader] ⊘ Skipping LLM grading (reranker confidence {avg_reranker_score:.4f} >= {DOCUMENT_GRADING_CONFIDENCE_THRESHOLD})")
+                            # Set document_grade_summary to pass without LLM calls
+                            result_dict["document_grade_summary"] = {
+                                "grade": "pass",
+                                "score": avg_reranker_score,
+                                "reasoning": f"Auto-pass: High reranker confidence ({avg_reranker_score:.4f})"
+                            }
+
+                    return result_dict
 
         return {"messages": tool_responses}
 
@@ -1351,9 +1368,17 @@ Reasoning: {query_analysis}"""
         Grade retrieved documents for relevance to the user query.
 
         Uses LLM to evaluate each document and determine overall relevance.
+
+        Optimization: If document_grade_summary is already set (from high reranker confidence),
+        skip LLM processing and return immediately.
         """
         if not ENABLE_REFLECTION or not ENABLE_DOCUMENT_GRADING:
             return {}
+
+        # Skip if already graded with high confidence (optimization)
+        existing_grade = state.get("document_grade_summary")
+        if existing_grade and existing_grade.get("grade") == "pass":
+            return {"document_grade_summary": existing_grade}
 
         start_time = time.time()
         retrieved_docs = state.get("retrieved_documents", [])

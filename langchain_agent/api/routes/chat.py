@@ -79,6 +79,31 @@ class ConnectionManager:
         """Return number of active connections."""
         return len(self.active_connections)
 
+    async def shutdown(self):
+        """
+        Shutdown the connection manager and clean up resources.
+
+        This should be called during application shutdown to properly
+        release memory held by the agent service, including models and
+        database connections.
+        """
+        # Close all active connections
+        for thread_id in list(self.active_connections.keys()):
+            try:
+                websocket = self.active_connections[thread_id]
+                await websocket.close()
+            except Exception as e:
+                print(f"Error closing WebSocket for {thread_id}: {e}")
+        self.active_connections.clear()
+
+        # Cleanup agent service if initialized
+        if self._agent_service is not None:
+            try:
+                await self._agent_service.cleanup()
+                self._agent_service = None
+            except Exception as e:
+                print(f"Error cleaning up agent service: {e}")
+
 
 # Global connection manager instance
 manager = ConnectionManager()

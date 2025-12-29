@@ -352,20 +352,24 @@ class ObservableAgentService:
 
         # Stream events from the graph executor
         # We use a separate thread for the generator to avoid blocking async
+        _SENTINEL = object()  # Sentinel to detect end of iteration
+
+        def safe_next(gen):
+            """Get next item from generator, returning sentinel if exhausted."""
+            try:
+                return next(gen)
+            except StopIteration:
+                return _SENTINEL
+
         async def consume_stream():
             """Consume the sync stream in a separate executor."""
             gen = run_sync_stream()
             while True:
-                try:
-                    # Get next event in executor
-                    event = await loop.run_in_executor(
-                        None,
-                        next,
-                        gen,
-                    )
-                    yield event
-                except StopIteration:
+                # Get next event in executor, using sentinel to detect end
+                event = await loop.run_in_executor(None, safe_next, gen)
+                if event is _SENTINEL:
                     break
+                yield event
 
         # Process events incrementally
         async for event in consume_stream():
@@ -715,3 +719,24 @@ class ObservableAgentService:
         except Exception as e:
             print(f"Error generating title: {e}")
             return None
+
+    async def cleanup(self):
+        """
+        Clean up resources held by the agent.
+
+        This must be called before shutting down the service to properly
+        release memory held by models (especially the reranker) and database
+        connections.
+        """
+        if self._agent:
+            try:
+                # Call the agent's cleanup method which handles:
+                # - Deleting reranker model from memory
+                # - Clearing CUDA cache
+                # - Closing database connection pool
+                self._agent.cleanup()
+                self._agent = None
+            except Exception as e:
+                print(f"Error during agent cleanup: {e}")
+            finally:
+                self._initialized = False
