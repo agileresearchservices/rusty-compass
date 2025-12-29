@@ -964,6 +964,7 @@ Example response:
         # Accumulate response content
         accumulated_content = ""
         chunk = None
+        streaming_succeeded = False
 
         try:
             # Stream from the LLM
@@ -973,6 +974,7 @@ Example response:
                 if hasattr(chunk, "content") and chunk.content:
                     content = chunk.content
                     accumulated_content += content
+                    streaming_succeeded = True
 
                     # Emit chunk event
                     chunk_event = LLMResponseChunkEvent(content=content, is_complete=False)
@@ -980,7 +982,11 @@ Example response:
 
         except Exception as e:
             logger.warning(f"Error during LLM streaming: {e}. Falling back to invoke.")
-            # Fall back to invoke if streaming fails
+            streaming_succeeded = False
+
+        # If streaming produced no content, fall back to invoke
+        if not accumulated_content:
+            logger.debug("Streaming produced empty response, falling back to invoke()")
             chunk = llm_with_tools.invoke(messages)
             accumulated_content = chunk.content if hasattr(chunk, "content") else str(chunk)
 
@@ -989,7 +995,7 @@ Example response:
         self._emit_streaming_event(completion_event)
 
         # Return the accumulated response as an AIMessage
-        # If chunk is already an AIMessage from the last iteration, use it
+        # If chunk is already an AIMessage from invoke fallback, use it
         # Otherwise, construct one from accumulated content
         if chunk and isinstance(chunk, AIMessage):
             return chunk
