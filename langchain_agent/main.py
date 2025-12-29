@@ -869,7 +869,44 @@ class LangChainAgent:
 
         print(f"\n[Query Evaluator] Starting evaluation for query: '{last_user_msg[:80]}...'")
 
-        # LLM evaluation prompt
+        # OPTIMIZATION: Try fast-path heuristics before expensive LLM evaluation
+        import re
+        query_lower = last_user_msg.lower().strip()
+
+        # Pattern 1: Pure semantic queries (what is, explain, describe)
+        if any(query_lower.startswith(p) for p in ["what is", "explain", "describe", "tell me about", "how does"]):
+            print(f"[Query Evaluator] ⚡ Fast-path: Pure Semantic (natural language question)")
+            elapsed = time.time() - start_time
+            print(f"  Evaluation time: {elapsed:.3f}s (skipped LLM, used heuristic)")
+            return {
+                "lambda_mult": 0.90,
+                "query_analysis": "Fast-path: Natural language question → Pure semantic search",
+                "optimized_query": last_user_msg
+            }
+
+        # Pattern 2: Lexical queries (dates, versions, model numbers, codes)
+        if re.search(r'\b\d{4}\b', query_lower) or re.search(r'v?\d+\.\d+(\.\d+)?', query_lower) or re.search(r'[A-Z]{2,}-\d+', query_lower):
+            print(f"[Query Evaluator] ⚡ Fast-path: Pure Lexical (numbers/versions/identifiers)")
+            elapsed = time.time() - start_time
+            print(f"  Evaluation time: {elapsed:.3f}s (skipped LLM, used heuristic)")
+            return {
+                "lambda_mult": 0.10,
+                "query_analysis": "Fast-path: Technical identifiers → Pure lexical search",
+                "optimized_query": query_lower
+            }
+
+        # Pattern 3: Balanced queries (how to, tutorial, guide, example, tips)
+        if any(word in query_lower for word in ["how to", "tutorial", "guide", "example", "tips", "best practices", "template"]):
+            print(f"[Query Evaluator] ⚡ Fast-path: Balanced (practical how-to query)")
+            elapsed = time.time() - start_time
+            print(f"  Evaluation time: {elapsed:.3f}s (skipped LLM, used heuristic)")
+            return {
+                "lambda_mult": 0.50,
+                "query_analysis": "Fast-path: How-to question → Balanced hybrid search",
+                "optimized_query": last_user_msg
+            }
+
+        # LLM evaluation prompt (for queries that don't match heuristics)
         evaluation_prompt = f"""Analyze this search query and determine the optimal search strategy AND optimized query.
 
 Query: "{last_user_msg}"
@@ -1412,12 +1449,12 @@ Reasoning: {query_analysis}"""
                         original_query = msg.content
                         break
 
-        # Grade each document
-        grades = []
-        for i, doc in enumerate(retrieved_docs, 1):
-            grade = self._grade_document(original_query, doc)
-            grades.append(grade)
-            # Show individual grading results
+        # OPTIMIZATION: Grade all documents in a single batch call (4-6x speedup)
+        # Instead of 4 sequential LLM calls, make 1 call for all documents
+        grades = self._grade_documents_batch(original_query, retrieved_docs)
+
+        # Show grading results
+        for i, grade in enumerate(grades, 1):
             status_icon = "✓" if grade["relevant"] else "✗"
             source = grade.get("source", "unknown")
             print(f"  {i}. {status_icon} [{source}] score={grade['score']:.2f} - {grade['reasoning']}")
@@ -1552,6 +1589,8 @@ Respond with ONLY the rewritten query, nothing else."""
         Grade the quality of the agent's final response.
 
         Evaluates relevance, completeness, and accuracy.
+
+        OPTIMIZATION: Skip grading if documents passed with high confidence (already validated).
         """
         if not ENABLE_REFLECTION or not ENABLE_RESPONSE_GRADING:
             return {}
@@ -1559,6 +1598,21 @@ Respond with ONLY the rewritten query, nothing else."""
         start_time = time.time()
         messages = state["messages"]
         original_query = state.get("original_query", "")
+
+        # OPTIMIZATION: Skip grading if documents already auto-passed (high confidence)
+        # If document grading was skipped due to high reranker confidence, documents are already validated
+        doc_summary = state.get("document_grade_summary", {})
+        if doc_summary.get("grade") == "pass" and "Auto-pass" in doc_summary.get("reasoning", ""):
+            print(f"\n[Response Grader] ⊘ Skipping LLM grading (documents auto-passed with high confidence)")
+            elapsed = time.time() - start_time
+            print(f"  Grading time: {elapsed:.3f}s (skipped)")
+            return {
+                "response_grade": {
+                    "grade": "pass",
+                    "score": doc_summary.get("score", 0.95),
+                    "reasoning": "Auto-pass: Documents validated with high reranker confidence"
+                }
+            }
 
         print(f"\n[Response Grader] Evaluating response quality...")
 
@@ -1650,6 +1704,92 @@ Use these guidelines:
                 "score": 0.5,
                 "reasoning": f"Grading failed: {str(e)[:50]}"
             }
+
+    def _grade_documents_batch(self, query: str, documents: List[Document]) -> List[DocumentGrade]:
+        """
+        OPTIMIZED: Grade multiple documents in a single LLM call instead of sequential calls.
+
+        Expected speedup: 4x-6x (grade 4 docs in ~3s vs ~13s)
+        Trades slight latency for massive efficiency gain (single API call vs 4 calls).
+
+        Args:
+            query: The user query
+            documents: List of documents to grade (max 4-5 recommended)
+
+        Returns:
+            List of DocumentGrade dicts in same order as input documents
+        """
+        if not documents:
+            return []
+
+        # Format all documents for batch evaluation
+        doc_sections = []
+        for i, doc in enumerate(documents, 1):
+            source = doc.metadata.get("source", "unknown")
+            content_preview = doc.page_content[:300]  # Shorter preview for batch
+            doc_sections.append(f"DOCUMENT {i} (from {source}):\n{content_preview}")
+
+        docs_text = "\n\n".join(doc_sections)
+
+        # Single LLM call for all documents
+        prompt = f"""Grade these {len(documents)} documents for relevance to the user's query.
+
+USER QUERY: {query}
+
+{docs_text}
+
+For each document, evaluate:
+1. Does it contain information that helps answer the query?
+2. Is the information directly relevant or tangential?
+3. Would using it improve the response quality?
+
+Respond with JSON array only (one object per document in order):
+[
+  {{"relevant": true, "score": 0.8, "reasoning": "brief one-sentence explanation"}},
+  {{"relevant": false, "score": 0.3, "reasoning": "brief one-sentence explanation"}}
+]
+
+Guidelines:
+- relevant: true if document helps answer the query
+- score: 0.0-1.0 indicating relevance strength
+- reasoning: one sentence only"""
+
+        try:
+            response = self.llm.invoke(prompt)
+            result_text = response.content.strip()
+
+            # Parse JSON array
+            results = json.loads(result_text)
+
+            # Ensure it's a list
+            if not isinstance(results, list):
+                results = [results]
+
+            # Pair with source metadata
+            grades = []
+            for i, (doc, grade_dict) in enumerate(zip(documents, results)):
+                source = doc.metadata.get("source", "unknown")
+                grades.append({
+                    "source": source,
+                    "relevant": bool(grade_dict.get("relevant", False)),
+                    "score": float(grade_dict.get("score", 0.5)),
+                    "reasoning": str(grade_dict.get("reasoning", "No reasoning"))
+                })
+
+            return grades
+
+        except Exception as e:
+            # Fallback: return all documents as marginally relevant
+            logger.warning(f"Batch document grading failed: {e}")
+            return [
+                {
+                    "source": doc.metadata.get("source", "unknown"),
+                    "relevant": True,
+                    "score": 0.5,
+                    "reasoning": f"Batch grading failed: {str(e)[:30]}"
+                }
+                for doc in documents
+            ]
 
     def _grade_response(self, query: str, response: str, doc_context: dict) -> ReflectionResult:
         """Grade the quality of the final response using LLM."""
