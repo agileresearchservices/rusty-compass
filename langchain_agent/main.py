@@ -945,10 +945,9 @@ Example response:
         """
         Stream the LLM response and accumulate the full response while emitting events.
 
-        Emits streaming events as content is received from the LLM:
-        - LLMResponseStartEvent: When streaming begins
-        - LLMResponseChunkEvent: For each content chunk (with is_complete=False)
-        - LLMResponseChunkEvent: Final empty chunk (with is_complete=True)
+        Falls back to invoke() when:
+        - Streaming produces no content (e.g., when tool calls are being made)
+        - An exception occurs during streaming
 
         Args:
             llm_with_tools: The LLM instance with tools bound
@@ -963,43 +962,47 @@ Example response:
 
         # Accumulate response content
         accumulated_content = ""
-        chunk = None
-        streaming_succeeded = False
+        invoke_result = None  # Result from invoke fallback (not streaming chunks)
+        chunk_count = 0
 
         try:
             # Stream from the LLM
             for chunk in llm_with_tools.stream(messages):
+                chunk_count += 1
+
                 # Extract content from chunk
-                # LangChain streams return different chunk types
+                # For tool-call responses, chunk.content might be None or empty
                 if hasattr(chunk, "content") and chunk.content:
-                    content = chunk.content
-                    accumulated_content += content
-                    streaming_succeeded = True
+                    accumulated_content += chunk.content
 
                     # Emit chunk event
-                    chunk_event = LLMResponseChunkEvent(content=content, is_complete=False)
+                    chunk_event = LLMResponseChunkEvent(content=chunk.content, is_complete=False)
                     self._emit_streaming_event(chunk_event)
 
         except Exception as e:
-            logger.warning(f"Error during LLM streaming: {e}. Falling back to invoke.")
-            streaming_succeeded = False
+            logger.warning(f"Exception during LLM streaming: {e}. Falling back to invoke.")
 
-        # If streaming produced no content, fall back to invoke
+        # If streaming produced no content (empty response), fall back to invoke
+        # This happens when tool calls are being made instead of text response
         if not accumulated_content:
-            logger.debug("Streaming produced empty response, falling back to invoke()")
-            chunk = llm_with_tools.invoke(messages)
-            accumulated_content = chunk.content if hasattr(chunk, "content") else str(chunk)
+            invoke_result = llm_with_tools.invoke(messages)
+
+            # Extract content from the response
+            if hasattr(invoke_result, "content"):
+                accumulated_content = invoke_result.content if invoke_result.content else ""
+            else:
+                accumulated_content = str(invoke_result)
 
         # Emit completion event
         completion_event = LLMResponseChunkEvent(content="", is_complete=True)
         self._emit_streaming_event(completion_event)
 
-        # Return the accumulated response as an AIMessage
-        # If chunk is already an AIMessage from invoke fallback, use it
-        # Otherwise, construct one from accumulated content
-        if chunk and isinstance(chunk, AIMessage):
-            return chunk
+        # If we got a result from invoke fallback, return it (preserves tool_calls)
+        if invoke_result and isinstance(invoke_result, AIMessage):
+            return invoke_result
         else:
+            # Otherwise construct AIMessage from accumulated content
+            # This covers both: streamed content, and invoke fallback without AIMessage type
             return AIMessage(content=accumulated_content)
 
     def _emit_streaming_event(self, event: LLMStreamingEvent) -> None:
