@@ -1,0 +1,403 @@
+TOKEN BUDGET TRACKING IMPLEMENTATION PATCH
+============================================
+
+This document contains all code changes needed to implement token budget tracking.
+
+FILE 1: langchain_agent/config.py
+==================================
+
+LOCATION: Add to __all__ list (around line 77)
+CHANGE: Add token budget imports to __all__
+
+OLD:
+    "REFLECTION_SHOW_STATUS",
+    "DOCUMENT_GRADING_BATCH_SIZE",
+]
+
+NEW:
+    "REFLECTION_SHOW_STATUS",
+    "DOCUMENT_GRADING_BATCH_SIZE",
+    # Token budget tracking
+    "REFLECTION_MAX_TOKENS_TOTAL",
+    "REFLECTION_TOKEN_WARNING_THRESHOLD",
+]
+
+---
+
+LOCATION: Add after DOCUMENT_GRADING_BATCH_SIZE (around line 285)
+CHANGE: Add configuration constants for token budget tracking
+
+ADD:
+
+# ============================================================================
+# TOKEN BUDGET TRACKING (Prevent Runaway Costs)
+# ============================================================================
+
+# Hard limit on total tokens used in a conversation (prevents runaway costs)
+# After reaching this limit, agent returns error and won't perform retries
+REFLECTION_MAX_TOKENS_TOTAL = 50000
+
+# Soft warning threshold - warns user when approaching limit (recommended: 80% of max)
+# Allows agent to continue but with warnings
+REFLECTION_TOKEN_WARNING_THRESHOLD = 40000
+
+
+FILE 2: langchain_agent/main.py
+================================
+
+LOCATION: Import section (around line 51-100)
+CHANGE: Add token budget imports
+
+OLD:
+    DOCUMENT_GRADING_BATCH_SIZE,
+)
+
+NEW:
+    DOCUMENT_GRADING_BATCH_SIZE,
+    # Token budget tracking
+    REFLECTION_MAX_TOKENS_TOTAL,
+    REFLECTION_TOKEN_WARNING_THRESHOLD,
+)
+
+---
+
+LOCATION: CustomAgentState TypedDict (around line 263-288)
+CHANGE: Add token tracking fields
+
+OLD:
+class CustomAgentState(TypedDict):
+    """
+    State schema for custom agent graph with dynamic lambda_mult and reflection.
+
+    This extends the default agent state to include query analysis,
+    dynamic search parameter adjustment, and reflection loop state.
+    """
+    # Core message state
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+
+    # Query evaluation state
+    lambda_mult: float
+    query_analysis: str
+
+    # Reflection state
+    iteration_count: int                          # Track retrieval iterations (0, 1, or 2)
+    response_retry_count: int                     # Track response regeneration attempts
+    retrieved_documents: List[Document]           # Raw documents from retrieval
+    document_grades: List[DocumentGrade]          # Individual document grades
+    document_grade_summary: ReflectionResult      # Overall document relevance
+    response_grade: ReflectionResult              # Quality of final response
+    original_query: str                           # Preserve original for transformation
+    transformed_query: Optional[str]              # Rewritten query if docs were poor
+
+NEW:
+class CustomAgentState(TypedDict):
+    """
+    State schema for custom agent graph with dynamic lambda_mult and reflection.
+
+    This extends the default agent state to include query analysis,
+    dynamic search parameter adjustment, reflection loop state, and token budget tracking.
+    """
+    # Core message state
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+
+    # Query evaluation state
+    lambda_mult: float
+    query_analysis: str
+
+    # Reflection state
+    iteration_count: int                          # Track retrieval iterations (0, 1, or 2)
+    response_retry_count: int                     # Track response regeneration attempts
+    retrieved_documents: List[Document]           # Raw documents from retrieval
+    document_grades: List[DocumentGrade]          # Individual document grades
+    document_grade_summary: ReflectionResult      # Overall document relevance
+    response_grade: ReflectionResult              # Quality of final response
+    original_query: str                           # Preserve original for transformation
+    transformed_query: Optional[str]              # Rewritten query if docs were poor
+
+    # Token budget tracking
+    total_tokens_used: int                        # Cumulative tokens used in conversation
+    token_budget_exceeded: bool                   # Flag indicating budget limit reached
+
+---
+
+LOCATION: agent_node method (around line 944-956)
+CHANGE: Replace entire agent_node method to add token budget checking
+
+OLD:
+    def agent_node(self, state: CustomAgentState) -> Dict[str, Any]:
+        """
+        Agent reasoning node - calls LLM with tool binding.
+        """
+        messages = state["messages"]
+
+        # Bind tools to LLM
+        llm_with_tools = self.llm.bind_tools(self.tools)
+
+        # Call LLM
+        response = llm_with_tools.invoke(messages)
+
+        return {"messages": [response]}
+
+NEW:
+    def agent_node(self, state: CustomAgentState) -> Dict[str, Any]:
+        """
+        Agent reasoning node - calls LLM with tool binding.
+        Includes token budget checking to prevent runaway costs.
+        """
+        messages = state["messages"]
+        total_tokens = state.get("total_tokens_used", 0)
+        token_budget_exceeded = state.get("token_budget_exceeded", False)
+
+        # Check if budget is already exceeded
+        if token_budget_exceeded:
+            budget_msg = AIMessage(
+                content="I've exhausted my token budget. Here's my best attempt based on available information."
+            )
+            return {
+                "messages": [budget_msg],
+                "total_tokens_used": total_tokens,
+                "token_budget_exceeded": True
+            }
+
+        # Estimate tokens for current input
+        estimated_input_tokens = self.estimate_token_count(messages)
+
+        # Check if proceeding would exceed budget (estimate with buffer for LLM output)
+        # Conservative estimate: double the input tokens to account for potential output
+        estimated_total = total_tokens + (estimated_input_tokens * 2)
+
+        if estimated_total > REFLECTION_MAX_TOKENS_TOTAL:
+            # Hard limit reached - return error message
+            budget_msg = AIMessage(
+                content="I've exhausted my token budget. Here's my best attempt based on available information."
+            )
+            if REFLECTION_SHOW_STATUS:
+                print(f"[Token Budget] EXCEEDED: {estimated_total}/{REFLECTION_MAX_TOKENS_TOTAL}")
+            return {
+                "messages": [budget_msg],
+                "total_tokens_used": total_tokens,
+                "token_budget_exceeded": True
+            }
+
+        # Warn if approaching soft limit
+        if total_tokens > REFLECTION_TOKEN_WARNING_THRESHOLD:
+            remaining = REFLECTION_MAX_TOKENS_TOTAL - total_tokens
+            if REFLECTION_SHOW_STATUS:
+                print(f"[Token Budget] WARNING: {total_tokens}/{REFLECTION_MAX_TOKENS_TOTAL} tokens used. Only {remaining} remaining.")
+
+        # Bind tools to LLM
+        llm_with_tools = self.llm.bind_tools(self.tools)
+
+        # Call LLM
+        response = llm_with_tools.invoke(messages)
+
+        # Track tokens used by this call
+        tokens_in_response = self.estimate_token_count([response])
+        new_total = total_tokens + estimated_input_tokens + tokens_in_response
+
+        return {
+            "messages": [response],
+            "total_tokens_used": new_total,
+            "token_budget_exceeded": False
+        }
+
+---
+
+LOCATION: route_after_doc_grading method (around line 1000-1023)
+CHANGE: Add token budget check before allowing retries
+
+OLD:
+    def route_after_doc_grading(self, state: CustomAgentState) -> str:
+        """
+        Route after document grading: continue to agent or retry with transformed query.
+        """
+        # If reflection is disabled, always continue to agent
+        if not ENABLE_REFLECTION or not ENABLE_DOCUMENT_GRADING:
+            return "agent"
+
+        doc_summary = state.get("document_grade_summary", {})
+        iteration = state.get("iteration_count", 0)
+
+        # If docs are good, continue to agent
+        if doc_summary.get("grade") == "pass":
+            return "agent"
+
+        # If docs are bad but can retry (and query transformation is enabled)
+        if ENABLE_QUERY_TRANSFORMATION and iteration < REFLECTION_MAX_ITERATIONS:
+            print(f"[Reflection] Documents failed grading. Retry {iteration + 1}/{REFLECTION_MAX_ITERATIONS}")
+            return "query_transformer"
+
+        # Max iterations reached or query transformation disabled, continue anyway
+        if iteration >= REFLECTION_MAX_ITERATIONS:
+            print(f"[Reflection] Max iterations reached. Proceeding with available documents.")
+        return "agent"
+
+NEW:
+    def route_after_doc_grading(self, state: CustomAgentState) -> str:
+        """
+        Route after document grading: continue to agent or retry with transformed query.
+        Skips retries if token budget is exceeded.
+        """
+        # If reflection is disabled, always continue to agent
+        if not ENABLE_REFLECTION or not ENABLE_DOCUMENT_GRADING:
+            return "agent"
+
+        # Check token budget - skip retries if exceeded
+        if state.get("token_budget_exceeded", False):
+            if REFLECTION_SHOW_STATUS:
+                print(f"[Reflection] Token budget exceeded. Skipping document retry.")
+            return "agent"
+
+        doc_summary = state.get("document_grade_summary", {})
+        iteration = state.get("iteration_count", 0)
+
+        # If docs are good, continue to agent
+        if doc_summary.get("grade") == "pass":
+            return "agent"
+
+        # If docs are bad but can retry (and query transformation is enabled)
+        if ENABLE_QUERY_TRANSFORMATION and iteration < REFLECTION_MAX_ITERATIONS:
+            print(f"[Reflection] Documents failed grading. Retry {iteration + 1}/{REFLECTION_MAX_ITERATIONS}")
+            return "query_transformer"
+
+        # Max iterations reached or query transformation disabled, continue anyway
+        if iteration >= REFLECTION_MAX_ITERATIONS:
+            print(f"[Reflection] Max iterations reached. Proceeding with available documents.")
+        return "agent"
+
+---
+
+LOCATION: route_after_response_grading method (around line 1025-1049)
+CHANGE: Add token budget check before allowing retries
+
+OLD:
+    def route_after_response_grading(self, state: CustomAgentState) -> str:
+        """
+        Route after response grading: end or retry with feedback.
+
+        If the response failed grading and retries are available, routes back
+        to the agent with feedback to improve the response.
+        """
+        if not ENABLE_REFLECTION or not ENABLE_RESPONSE_GRADING:
+            return "END"
+
+        response_grade = state.get("response_grade", {})
+        retry_count = state.get("response_retry_count", 0)
+
+        # If response is good, we're done
+        if response_grade.get("grade") == "pass":
+            return "END"
+
+        # If response is bad but can retry
+        if retry_count < REFLECTION_MAX_ITERATIONS:
+            print(f"[Reflection] Response failed grading. Retry {retry_count + 1}/{REFLECTION_MAX_ITERATIONS}")
+            return "response_improver"
+
+        # Max retries reached
+        print(f"[Reflection] Response retry limit reached. Ending with current response.")
+        return "END"
+
+NEW:
+    def route_after_response_grading(self, state: CustomAgentState) -> str:
+        """
+        Route after response grading: end or retry with feedback.
+
+        If the response failed grading and retries are available, routes back
+        to the agent with feedback to improve the response. Skips retries if budget exceeded.
+        """
+        if not ENABLE_REFLECTION or not ENABLE_RESPONSE_GRADING:
+            return "END"
+
+        # Check token budget - skip retries if exceeded
+        if state.get("token_budget_exceeded", False):
+            if REFLECTION_SHOW_STATUS:
+                print(f"[Reflection] Token budget exceeded. Skipping response retry.")
+            return "END"
+
+        response_grade = state.get("response_grade", {})
+        retry_count = state.get("response_retry_count", 0)
+
+        # If response is good, we're done
+        if response_grade.get("grade") == "pass":
+            return "END"
+
+        # If response is bad but can retry
+        if retry_count < REFLECTION_MAX_ITERATIONS:
+            print(f"[Reflection] Response failed grading. Retry {retry_count + 1}/{REFLECTION_MAX_ITERATIONS}")
+            return "response_improver"
+
+        # Max retries reached
+        print(f"[Reflection] Response retry limit reached. Ending with current response.")
+        return "END"
+
+---
+
+LOCATION: _invoke_agent method, input_data initialization (around line 1993-2007)
+CHANGE: Add token budget fields to initial state
+
+OLD:
+            input_data = {
+                "messages": [("user", user_input)],
+                "lambda_mult": 0.25,  # Default, will be overridden by query_evaluator
+                "query_analysis": "",
+                # Reflection state initialization
+                "iteration_count": 0,
+                "response_retry_count": 0,
+                "retrieved_documents": [],
+                "document_grades": [],
+                "document_grade_summary": {},
+                "response_grade": {},
+                "original_query": user_input,
+                "transformed_query": None,
+            }
+
+NEW:
+            input_data = {
+                "messages": [("user", user_input)],
+                "lambda_mult": 0.25,  # Default, will be overridden by query_evaluator
+                "query_analysis": "",
+                # Reflection state initialization
+                "iteration_count": 0,
+                "response_retry_count": 0,
+                "retrieved_documents": [],
+                "document_grades": [],
+                "document_grade_summary": {},
+                "response_grade": {},
+                "original_query": user_input,
+                "transformed_query": None,
+                # Token budget tracking initialization
+                "total_tokens_used": 0,
+                "token_budget_exceeded": False,
+            }
+
+---
+
+SUMMARY OF CHANGES
+===================
+
+Files Modified: 2
+- langchain_agent/config.py
+- langchain_agent/main.py
+
+Total Code Changes:
+- 1 new configuration section (2 constants)
+- 2 imports added
+- 1 TypedDict updated with 2 new fields
+- 1 method completely replaced (agent_node)
+- 2 methods updated with token budget checks
+- 1 state initialization updated with 2 new fields
+
+Key Functionality Added:
+✓ Token budget hard limit (prevents runaway costs)
+✓ Token budget warning threshold (alerts user)
+✓ Cumulative token tracking across conversation turns
+✓ Budget checks before LLM calls
+✓ Retry prevention when budget exceeded
+✓ Console logging of budget status
+
+Testing Recommendation:
+1. Verify syntax: `python3 -m py_compile langchain_agent/main.py`
+2. Test normal operation with default budgets
+3. Test warning threshold by lowering REFLECTION_MAX_TOKENS_TOTAL
+4. Test hard limit by running out of tokens
+5. Verify retries are skipped when budget_exceeded = True

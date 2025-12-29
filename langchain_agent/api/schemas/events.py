@@ -105,6 +105,7 @@ class SearchCandidate(BaseModel):
 
     source: str
     snippet: str
+    full_content: Optional[str] = None
     vector_score: Optional[float] = None
     text_score: Optional[float] = None
     rrf_score: Optional[float] = None
@@ -311,6 +312,50 @@ class AgentErrorEvent(BaseEvent):
 
 
 # ============================================================================
+# TOKEN BUDGET EVENTS
+# ============================================================================
+
+
+class TokenBudgetEvent(BaseEvent):
+    """Emitted when token usage is tracked against budget."""
+
+    type: Literal["token_budget"] = "token_budget"
+    total_tokens_used: int
+    token_budget: int
+    budget_exceeded: bool
+    warning_threshold_hit: bool
+
+
+# ============================================================================
+# CACHE HIT EVENTS
+# ============================================================================
+
+
+class CacheHitEvent(BaseEvent):
+    """Emitted when a cache hit occurs."""
+
+    type: Literal["cache_hit"] = "cache_hit"
+    node: Literal["query_evaluator"] = "query_evaluator"
+    query: str
+    cached_result: Dict[str, Any]  # lambda_mult + query_analysis
+
+
+# ============================================================================
+# CONFIDENCE SCORE EVENTS
+# ============================================================================
+
+
+class ConfidenceScoreEvent(BaseEvent):
+    """Emitted when confidence scoring is performed."""
+
+    type: Literal["confidence_score"] = "confidence_score"
+    node: str  # response_grader, document_grader, etc.
+    score: float  # 0.0-1.0
+    confidence: float  # 0.0-1.0
+    early_stop_triggered: bool
+
+
+# ============================================================================
 # METRICS EVENT
 # ============================================================================
 
@@ -355,5 +400,8 @@ AgentEvent = (
     | ResponseImprovementEvent
     | AgentCompleteEvent
     | AgentErrorEvent
+    | TokenBudgetEvent
+    | CacheHitEvent
+    | ConfidenceScoreEvent
     | MetricsEvent
 )

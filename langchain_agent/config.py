@@ -46,6 +46,8 @@ __all__ = [
     "ENABLE_QUERY_EVALUATION",
     "DEFAULT_LAMBDA_MULT",
     "QUERY_EVAL_TIMEOUT_MS",
+    "ENABLE_QUERY_EVAL_CACHE",
+    "QUERY_EVAL_CACHE_MAX_SIZE",
     # Project paths
     "BASE_DIR",
     "SAMPLE_DOCS_DIR",
@@ -72,6 +74,15 @@ __all__ = [
     "REFLECTION_DOC_SCORE_THRESHOLD",
     "REFLECTION_RESPONSE_SCORE_THRESHOLD",
     "REFLECTION_SHOW_STATUS",
+    "DOCUMENT_GRADING_BATCH_SIZE",
+    # Token budget tracking
+    "REFLECTION_MAX_TOKENS_TOTAL",
+    "REFLECTION_TOKEN_WARNING_THRESHOLD",
+    # Response grading confidence-based early stopping
+    "RESPONSE_GRADING_HIGH_CONFIDENCE_THRESHOLD",
+    "RESPONSE_GRADING_LOW_CONFIDENCE_RETRY",
+    # Observable agent streaming configuration
+    "ENABLE_ASYNC_STREAMING",
 ]
 
 # ============================================================================
@@ -183,6 +194,10 @@ DEFAULT_LAMBDA_MULT = 0.25
 # Query evaluation timeout (milliseconds) - max time to wait for LLM evaluation
 QUERY_EVAL_TIMEOUT_MS = 3000  # 3 seconds max for LLM evaluation
 
+# Query evaluator caching configuration
+ENABLE_QUERY_EVAL_CACHE = True
+QUERY_EVAL_CACHE_MAX_SIZE = 100
+
 # ============================================================================
 # AGENT CONFIGURATION
 # ============================================================================
@@ -271,3 +286,50 @@ REFLECTION_RESPONSE_SCORE_THRESHOLD = 0.6
 
 # Display reflection status in console output
 REFLECTION_SHOW_STATUS = True
+
+# Batch size for document grading (process this many documents per LLM call)
+# If more documents than this, they will be processed in batches
+# Set to 1 to disable batch grading and grade documents individually
+DOCUMENT_GRADING_BATCH_SIZE = 5
+
+# ============================================================================
+# TOKEN BUDGET TRACKING (Prevent Runaway Costs)
+# ============================================================================
+
+# Hard limit on total tokens used in a conversation (prevents runaway costs)
+# After reaching this limit, agent returns error and won't perform retries
+REFLECTION_MAX_TOKENS_TOTAL = 50000
+
+# Soft warning threshold - warns user when approaching limit (recommended: 80% of max)
+# Allows agent to continue but with warnings
+REFLECTION_TOKEN_WARNING_THRESHOLD = 40000
+
+# ============================================================================
+# RESPONSE GRADING CONFIDENCE-BASED EARLY STOPPING
+# ============================================================================
+
+# Confidence threshold for early stopping with passing grade (0.0-1.0)
+# If grade is "pass" AND confidence > this value, skip retry loop and return response
+# Example: 0.85 means "if we're 85% confident this is a good response, don't retry"
+RESPONSE_GRADING_HIGH_CONFIDENCE_THRESHOLD = 0.85
+
+# Confidence threshold for forced retry (0.0-1.0)
+# If confidence < this value AND retry_count < max, always retry regardless of grade
+# Example: 0.5 means "if we're less than 50% confident, force a retry"
+RESPONSE_GRADING_LOW_CONFIDENCE_RETRY = 0.5
+
+# ============================================================================
+# OBSERVABLE AGENT STREAMING CONFIGURATION
+# ============================================================================
+
+# Enable incremental async streaming for improved responsiveness (EXPERIMENTAL)
+# When False (default): Backward compatible behavior - waits for entire node completion
+#   - Runs entire graph in executor, collects all timing info after completion
+#   - More blocking but stable behavior
+# When True: Improved streaming with incremental event emission
+#   - Emits NodeStartEvent immediately when node begins execution
+#   - Processes events as they complete instead of waiting for full node
+#   - Emits NodeEndEvent with accurate timing after processing
+#   - TRADEOFF: Timing may be slightly less accurate than legacy mode, but
+#     provides better UI responsiveness and prevents async event loop blocking
+ENABLE_ASYNC_STREAMING = False

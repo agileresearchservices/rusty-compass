@@ -9,6 +9,10 @@ import { QueryEvaluatorDetails } from './details/QueryEvaluatorDetails'
 import { SearchDetails } from './details/SearchDetails'
 import { DocumentGraderDetails } from './details/DocumentGraderDetails'
 import { ResponseGraderDetails } from './details/ResponseGraderDetails'
+import { LLMAgentDetails } from './details/LLMAgentDetails'
+import { QueryTransformerDetails } from './details/QueryTransformerDetails'
+import { ResponseImproverDetails } from './details/ResponseImproverDetails'
+import { EventCard } from './EventCard'
 import clsx from 'clsx'
 
 interface StepCardProps {
@@ -150,30 +154,13 @@ function StepDetails({ step }: { step: ObservabilityStep }) {
       return <ResponseGraderDetails />
 
     case 'agent':
-      return (
-        <div className="text-sm text-gray-400">
-          <p>LLM is processing the query and generating a response.</p>
-          {step.events.length > 0 && (
-            <div className="mt-2 text-xs text-gray-500">
-              {step.events.length} event{step.events.length !== 1 ? 's' : ''} recorded
-            </div>
-          )}
-        </div>
-      )
+      return <LLMAgentDetails />
 
     case 'query_transformer':
-      return (
-        <div className="text-sm text-gray-400">
-          <p>Query is being rewritten for better retrieval results.</p>
-        </div>
-      )
+      return <QueryTransformerDetails />
 
     case 'response_improver':
-      return (
-        <div className="text-sm text-gray-400">
-          <p>Response is being refined based on grading feedback.</p>
-        </div>
-      )
+      return <ResponseImproverDetails />
 
     default:
       return (

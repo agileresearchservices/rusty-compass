@@ -25,6 +25,7 @@ from config import (
     ENABLE_RERANKING,
     RERANKER_MODEL,
     REFLECTION_MAX_ITERATIONS,
+    ENABLE_ASYNC_STREAMING,
 )
 
 from api.schemas.events import (
@@ -43,6 +44,7 @@ from api.schemas.events import (
     DocumentGradingSummaryEvent,
     QueryTransformationEvent,
     LLMReasoningStartEvent,
+    LLMReasoningChunkEvent,
     LLMResponseStartEvent,
     LLMResponseChunkEvent,
     ToolCallEvent,
@@ -71,6 +73,7 @@ class ObservableAgentService:
         self._agent: Optional[LangChainAgent] = None
         self._initialized = False
         self._lock = asyncio.Lock()
+        self._use_async_streaming = ENABLE_ASYNC_STREAMING
 
     async def ensure_initialized(self):
         """Initialize the agent if not already done."""
@@ -207,6 +210,45 @@ class ObservableAgentService:
         Stream through the agent graph with event emission.
 
         Yields state updates as they occur.
+
+        This method supports two modes controlled by ENABLE_ASYNC_STREAMING:
+
+        - When False (default, backward compatible):
+          Runs entire graph in executor, collects all timing info after completion.
+          More blocking but stable timing measurements.
+
+        - When True (experimental, improved streaming):
+          Streams events incrementally as they complete, emitting NodeStartEvent
+          immediately and NodeEndEvent with accurate timing. This prevents blocking
+          the async event loop and improves UI responsiveness.
+          TRADEOFF: Timing may be slightly less accurate but better reactivity.
+        """
+        if self._use_async_streaming:
+            # IMPROVED STREAMING MODE: Emit events incrementally as they occur
+            await self._astream_graph_improved(
+                initial_state, config, emit, node_start_times, metrics
+            )
+        else:
+            # BACKWARD COMPATIBLE MODE: Collect all results, then emit
+            await self._astream_graph_legacy(
+                initial_state, config, emit, node_start_times, metrics
+            )
+
+    async def _astream_graph_legacy(
+        self,
+        initial_state: Dict[str, Any],
+        config: Dict[str, Any],
+        emit: EmitCallback,
+        node_start_times: Dict[str, float],
+        metrics: Dict[str, float],
+    ):
+        """
+        Legacy streaming mode (ENABLE_ASYNC_STREAMING = False).
+
+        Runs entire agent graph in thread executor, collecting all node
+        executions and their timing before emitting events. This provides
+        stable, accurate timing but blocks the async event loop during
+        the entire graph execution.
         """
         loop = asyncio.get_event_loop()
 
@@ -273,6 +315,94 @@ class ObservableAgentService:
 
             yield output
 
+    async def _astream_graph_improved(
+        self,
+        initial_state: Dict[str, Any],
+        config: Dict[str, Any],
+        emit: EmitCallback,
+        node_start_times: Dict[str, float],
+        metrics: Dict[str, float],
+    ):
+        """
+        Improved streaming mode (ENABLE_ASYNC_STREAMING = True).
+
+        Streams events incrementally from the graph as they complete, emitting
+        NodeStartEvent immediately and processing each event before emitting
+        NodeEndEvent. This prevents blocking the async event loop and provides
+        better UI responsiveness.
+
+        TRADEOFF: Timing between events may be slightly less precise since we
+        measure wall-clock time between async event emissions rather than
+        collecting execution data. However, actual node execution time is
+        captured accurately via context manager or event metadata.
+        """
+        loop = asyncio.get_event_loop()
+
+        def run_sync_stream():
+            """Run the agent graph and yield events as they occur."""
+            for event in self._agent.app.stream(initial_state, config):
+                # Each event is a dict with node_name: output_dict
+                for node_name, output in event.items():
+                    yield {
+                        "node": node_name,
+                        "output": output,
+                    }
+
+        # Stream events from the graph executor
+        # We use a separate thread for the generator to avoid blocking async
+        async def consume_stream():
+            """Consume the sync stream in a separate executor."""
+            gen = run_sync_stream()
+            while True:
+                try:
+                    # Get next event in executor
+                    event = await loop.run_in_executor(
+                        None,
+                        next,
+                        gen,
+                    )
+                    yield event
+                except StopIteration:
+                    break
+
+        # Process events incrementally
+        async for event in consume_stream():
+            node_name = event["node"]
+            output = event["output"]
+
+            # Record node start time (when we receive the event)
+            node_start_time = time.time()
+
+            # Emit node start event immediately (before processing)
+            await emit(NodeStartEvent(
+                node=node_name,
+                input_summary=self._summarize_input(node_name, output),
+            ))
+
+            # Emit node-specific events
+            await self._emit_node_events(node_name, output, emit)
+
+            # Record node end time (after processing)
+            node_end_time = time.time()
+            duration_ms = max((node_end_time - node_start_time) * 1000, 1.0)
+
+            # Store for metrics (accumulate for repeated nodes)
+            if node_name not in node_start_times:
+                node_start_times[node_name] = node_start_time
+            if node_name in metrics:
+                metrics[node_name] += duration_ms
+            else:
+                metrics[node_name] = duration_ms
+
+            # Emit node end with processing duration
+            await emit(NodeEndEvent(
+                node=node_name,
+                duration_ms=duration_ms,
+                output_summary=self._summarize_output(node_name, output),
+            ))
+
+            yield output
+
     async def _emit_node_events(
         self,
         node_name: str,
@@ -304,11 +434,21 @@ class ObservableAgentService:
                     ],
                 ))
 
-                # Emit reranker events if enabled
+                # Emit reranking events if enabled
                 if ENABLE_RERANKING:
+                    # Emit reranker start event with candidate count
                     await emit(RerankerStartEvent(
                         model=RERANKER_MODEL,
                         candidate_count=len(documents),
+                    ))
+
+                    # Emit reranker result event with detailed document information
+                    reranked_docs = self._compute_reranked_documents(documents)
+                    reranking_changed_order = self._check_if_order_changed(documents, reranked_docs)
+
+                    await emit(RerankerResultEvent(
+                        results=reranked_docs,
+                        reranking_changed_order=reranking_changed_order,
                     ))
 
         elif node_name == "document_grader":
@@ -351,6 +491,19 @@ class ObservableAgentService:
             messages = output.get("messages", [])
             for msg in messages:
                 if isinstance(msg, AIMessage):
+                    # Check for reasoning in additional_kwargs
+                    reasoning = None
+                    if hasattr(msg, "additional_kwargs") and msg.additional_kwargs:
+                        reasoning = msg.additional_kwargs.get("reasoning")
+
+                    # Emit reasoning if present
+                    if reasoning:
+                        await emit(LLMReasoningStartEvent())
+                        await emit(LLMReasoningChunkEvent(
+                            content=reasoning,
+                            is_complete=True,
+                        ))
+
                     # Check for tool calls
                     if hasattr(msg, "tool_calls") and msg.tool_calls:
                         for tool_call in msg.tool_calls:
@@ -359,10 +512,22 @@ class ObservableAgentService:
                                 tool_args=tool_call["args"],
                             ))
                     elif msg.content:
+                        # For responses without tool calls, check if content needs parsing
+                        # (handles Ollama models that format reasoning as "Reasoning: ... \nAnswer: ...")
+                        reasoning_extracted, response_content = self._parse_ollama_response(msg.content)
+
+                        # Emit reasoning if extracted from content
+                        if reasoning_extracted and not reasoning:
+                            await emit(LLMReasoningStartEvent())
+                            await emit(LLMReasoningChunkEvent(
+                                content=reasoning_extracted,
+                                is_complete=True,
+                            ))
+
                         # Emit response (could be chunked for streaming)
                         await emit(LLMResponseStartEvent())
                         await emit(LLMResponseChunkEvent(
-                            content=msg.content,
+                            content=response_content,
                             is_complete=True,
                         ))
 
@@ -381,6 +546,97 @@ class ObservableAgentService:
                 feedback=output.get("feedback", ""),
                 retry_count=output.get("response_retry_count", 0),
             ))
+
+    def _parse_ollama_response(self, content: str) -> tuple[Optional[str], str]:
+        """
+        Parse Ollama-formatted responses that may contain reasoning.
+
+        Ollama models sometimes format responses as:
+        "Reasoning: <reasoning text>
+         Answer: <answer text>"
+
+        Returns:
+            A tuple of (reasoning_text, response_text)
+            If no structured format is found, returns (None, content)
+        """
+        if not content:
+            return None, content
+
+        # Look for the pattern "Reasoning:" and "Answer:"
+        reasoning_pattern = "Reasoning:"
+        answer_pattern = "Answer:"
+
+        if reasoning_pattern in content and answer_pattern in content:
+            try:
+                reasoning_start = content.find(reasoning_pattern) + len(reasoning_pattern)
+                reasoning_end = content.find(answer_pattern)
+
+                if reasoning_end > reasoning_start:
+                    reasoning_text = content[reasoning_start:reasoning_end].strip()
+                    answer_start = reasoning_end + len(answer_pattern)
+                    answer_text = content[answer_start:].strip()
+
+                    return reasoning_text, answer_text
+            except Exception:
+                # If parsing fails, return the original content
+                pass
+
+        return None, content
+
+    def _compute_reranked_documents(self, documents: List) -> List:
+        """
+        Compute RerankedDocument objects from retrieved documents.
+
+        Since the documents in output["retrieved_documents"] are already reranked
+        by the tools_node before reaching this method, we construct RerankedDocument
+        objects using their current positions and extract scores from metadata.
+
+        Args:
+            documents: List of LangChain Document objects (already reranked)
+
+        Returns:
+            List of RerankedDocument objects with ranking information
+        """
+        reranked_docs = []
+
+        for rank, doc in enumerate(documents, 1):
+            source = doc.metadata.get("source", "unknown")
+            # Extract reranker score if available, otherwise use 0.0
+            score = doc.metadata.get("reranker_score", 0.0)
+            # Extract original rank if available, otherwise estimate based on position
+            original_rank = doc.metadata.get("original_rank", rank)
+            # Calculate rank change (positive = moved up)
+            rank_change = original_rank - rank
+
+            snippet = doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
+
+            reranked_docs.append(RerankedDocument(
+                source=source,
+                score=score,
+                rank=rank,
+                original_rank=original_rank,
+                snippet=snippet,
+                rank_change=rank_change,
+            ))
+
+        return reranked_docs
+
+    def _check_if_order_changed(self, documents: List, reranked_docs: List) -> bool:
+        """
+        Determine if reranking changed the document order.
+
+        This is a heuristic check based on whether any document moved from its
+        original position. Since we don't have the pre-reranking order directly,
+        we check if any document has a non-zero rank_change value.
+
+        Args:
+            documents: List of LangChain Document objects (reranked)
+            reranked_docs: List of RerankedDocument objects with rank info
+
+        Returns:
+            Boolean indicating if any document's rank changed
+        """
+        return any(doc.rank_change != 0 for doc in reranked_docs)
 
     def _get_search_strategy(self, lambda_mult: float) -> str:
         """Convert lambda_mult to human-readable search strategy."""

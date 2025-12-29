@@ -50,6 +50,7 @@ export interface QueryEvaluationEvent extends BaseEvent {
 export interface SearchCandidate {
   source: string
   snippet: string
+  full_content?: string
   vector_score?: number
   text_score?: number
   rrf_score?: number
@@ -201,6 +202,32 @@ export interface AgentErrorEvent extends BaseEvent {
   recoverable: boolean
 }
 
+// Token budget events
+export interface TokenBudgetEvent extends BaseEvent {
+  type: 'token_budget'
+  total_tokens_used: number
+  token_budget: number
+  budget_exceeded: boolean
+  warning_threshold_hit: boolean
+}
+
+// Cache hit events
+export interface CacheHitEvent extends BaseEvent {
+  type: 'cache_hit'
+  node: 'query_evaluator'
+  query: string
+  cached_result: Record<string, unknown>
+}
+
+// Confidence score events
+export interface ConfidenceScoreEvent extends BaseEvent {
+  type: 'confidence_score'
+  node: string
+  score: number
+  confidence: number
+  early_stop_triggered: boolean
+}
+
 // Metrics event
 export interface MetricsEvent extends BaseEvent {
   type: 'metrics'
@@ -237,6 +264,9 @@ export type AgentEvent =
   | ResponseImprovementEvent
   | AgentCompleteEvent
   | AgentErrorEvent
+  | TokenBudgetEvent
+  | CacheHitEvent
+  | ConfidenceScoreEvent
   | MetricsEvent
 
 // Helper type guards

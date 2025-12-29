@@ -3,11 +3,11 @@
  */
 
 import { useObservabilityStore } from '../../stores/observabilityStore'
-import { Clock, Zap, FileSearch, Brain, CheckSquare } from 'lucide-react'
+import { Clock, Zap, FileSearch, Brain, CheckSquare, Layers, Radio, RotateCw } from 'lucide-react'
 import clsx from 'clsx'
 
 export function MetricsView() {
-  const { metrics, steps, isExecuting } = useObservabilityStore()
+  const { metrics, steps, isExecuting, queryEvaluation, documentGradingSummary, responseGrading } = useObservabilityStore()
 
   if (!metrics && steps.length === 0) {
     return (
@@ -41,6 +41,71 @@ export function MetricsView() {
     response_grading_ms: stepMetrics['response_grader'],
     total_ms: stepMetrics.total,
   }
+
+  // Extract additional metrics from events
+  const getDocumentGradingBatchInfo = () => {
+    if (!documentGradingSummary) return null
+    const { total_count, relevant_count } = documentGradingSummary
+    // Consider it batched if there are multiple documents
+    const isBatched = total_count > 1
+    return {
+      isBatched,
+      totalCount: total_count,
+      relevantCount: relevant_count,
+    }
+  }
+
+  const getReflectionIterationBreakdown = () => {
+    // Count document retries (query_transformer iterations)
+    const documentRetries = steps.filter(s => s.node === 'query_transformer').length
+    // Count response retries from response_grading events
+    let responseRetries = 0
+    steps.forEach(step => {
+      step.events.forEach(event => {
+        if (event.type === 'response_grading' && 'retry_count' in event) {
+          responseRetries = Math.max(responseRetries, event.retry_count)
+        }
+      })
+    })
+    return {
+      documentRetries,
+      responseRetries,
+      totalRetries: documentRetries + responseRetries,
+    }
+  }
+
+  const getCacheHitRate = () => {
+    // Check if query_evaluator has search_strategy info
+    if (!queryEvaluation) return null
+    // If it executed, we assume it was a cache miss (not using cached results)
+    // In a real scenario, this would be explicitly provided in the event
+    return {
+      hasInfo: true,
+      strategy: queryEvaluation.search_strategy,
+    }
+  }
+
+  const getStreamingIndicator = () => {
+    // Check if LLM response events indicate streaming by looking for chunk events
+    const llmChunks = steps.reduce((acc, step) => {
+      if (step.node === 'agent') {
+        const chunks = step.events.filter(e =>
+          e.type === 'llm_response_chunk' || e.type === 'llm_reasoning_chunk'
+        ).length
+        acc += chunks
+      }
+      return acc
+    }, 0)
+    return {
+      isStreaming: llmChunks > 1,
+      chunkCount: llmChunks,
+    }
+  }
+
+  const batchInfo = getDocumentGradingBatchInfo()
+  const iterationBreakdown = getReflectionIterationBreakdown()
+  const cacheMetrics = getCacheHitRate()
+  const streamingMetrics = getStreamingIndicator()
 
   const metricItems = [
     {
@@ -178,6 +243,148 @@ export function MetricsView() {
           <span className="text-sm text-gray-400">Steps Executed</span>
           <span className="text-lg font-medium text-white">{steps.length}</span>
         </div>
+      </div>
+
+      {/* Additional Metrics Section */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-medium text-gray-400">Additional Metrics</h3>
+
+        {/* Search Strategy / Cache Info */}
+        {cacheMetrics && (
+          <div className="obs-card bg-blue-500/10">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Radio className="w-4 h-4 text-blue-400" />
+                <span className="text-sm text-gray-300">Search Strategy</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className={clsx(
+                  'px-2 py-1 rounded text-xs font-medium',
+                  cacheMetrics.strategy === 'semantic-heavy'
+                    ? 'bg-blue-500/30 text-blue-300'
+                    : cacheMetrics.strategy === 'lexical-heavy'
+                    ? 'bg-amber-500/30 text-amber-300'
+                    : 'bg-purple-500/30 text-purple-300'
+                )}
+              >
+                {cacheMetrics.strategy === 'semantic-heavy'
+                  ? 'Semantic-Heavy'
+                  : cacheMetrics.strategy === 'lexical-heavy'
+                  ? 'Lexical-Heavy'
+                  : 'Balanced'}
+              </span>
+              <span className="text-xs text-gray-500">
+                {cacheMetrics.strategy === 'semantic-heavy'
+                  ? 'Vector-based search emphasized'
+                  : cacheMetrics.strategy === 'lexical-heavy'
+                  ? 'Keyword search emphasized'
+                  : 'Both methods equally weighted'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Streaming Indicator */}
+        <div className={clsx('obs-card', streamingMetrics.isStreaming ? 'bg-cyan-500/10' : 'bg-gray-700/30')}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Radio className="w-4 h-4" style={{ color: streamingMetrics.isStreaming ? '#06b6d4' : '#9ca3af' }} />
+              <span className="text-sm text-gray-300">Response Delivery</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={clsx(
+                'px-2 py-1 rounded text-xs font-medium',
+                streamingMetrics.isStreaming
+                  ? 'bg-cyan-500/30 text-cyan-300'
+                  : 'bg-gray-700 text-gray-400'
+              )}
+            >
+              {streamingMetrics.isStreaming ? 'Streaming' : 'Non-Streaming'}
+            </span>
+            {streamingMetrics.isStreaming && (
+              <span className="text-xs text-gray-500">
+                {streamingMetrics.chunkCount} chunks
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Document Grading Batch Info */}
+        {batchInfo && (
+          <div className={clsx('obs-card', batchInfo.isBatched ? 'bg-emerald-500/10' : 'bg-gray-700/30')}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4" style={{ color: batchInfo.isBatched ? '#10b981' : '#9ca3af' }} />
+                <span className="text-sm text-gray-300">Document Grading</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span
+                  className={clsx(
+                    'px-2 py-1 rounded text-xs font-medium',
+                    batchInfo.isBatched
+                      ? 'bg-emerald-500/30 text-emerald-300'
+                      : 'bg-gray-700 text-gray-400'
+                  )}
+                >
+                  {batchInfo.isBatched ? 'Batched' : 'Single'}
+                </span>
+                <span className="text-xs text-gray-500">
+                  {batchInfo.relevantCount}/{batchInfo.totalCount} relevant
+                </span>
+              </div>
+              <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400"
+                  style={{
+                    width: `${batchInfo.totalCount > 0 ? (batchInfo.relevantCount / batchInfo.totalCount) * 100 : 0}%`,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Reflection Iteration Breakdown */}
+        {iterationBreakdown.totalRetries > 0 && (
+          <div className="obs-card bg-amber-500/10">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <RotateCw className="w-4 h-4 text-amber-400" />
+                <span className="text-sm text-gray-300">Reflection Iterations</span>
+              </div>
+              <span className="text-sm font-medium text-amber-300">
+                {iterationBreakdown.totalRetries} total
+              </span>
+            </div>
+            <div className="space-y-2">
+              {iterationBreakdown.documentRetries > 0 && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-500">Document Retries (query refinement)</span>
+                  <span className="text-amber-300 font-medium">{iterationBreakdown.documentRetries}</span>
+                </div>
+              )}
+              {iterationBreakdown.responseRetries > 0 && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-500">Response Retries (improvement)</span>
+                  <span className="text-amber-300 font-medium">{iterationBreakdown.responseRetries}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* No additional metrics info */}
+        {!cacheMetrics && iterationBreakdown.totalRetries === 0 && !batchInfo && (
+          <div className="text-xs text-gray-500 text-center py-4">
+            No additional metrics available
+          </div>
+        )}
       </div>
     </div>
   )

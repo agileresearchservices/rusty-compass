@@ -38,8 +38,41 @@ from psycopg_pool import ConnectionPool
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, BaseMessage, AIMessage, HumanMessage, ToolMessage
 from langchain_core.documents import Document
+from dataclasses import dataclass
+from typing import Generator
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
+# ============================================================================
+# STREAMING EVENT DEFINITIONS
+# ============================================================================
+
+@dataclass
+class LLMStreamingEvent:
+    """Base class for LLM streaming events"""
+    pass
+
+@dataclass
+class LLMResponseStartEvent(LLMStreamingEvent):
+    """Emitted when LLM starts generating a response"""
+    timestamp: float = None
+
+    def __post_init__(self):
+        if self.timestamp is None:
+            import time
+            self.timestamp = time.time()
+
+@dataclass
+class LLMResponseChunkEvent(LLMStreamingEvent):
+    """Emitted for each chunk of content received from the LLM stream"""
+    content: str = ""
+    is_complete: bool = False
+    timestamp: float = None
+
+    def __post_init__(self):
+        if self.timestamp is None:
+            import time
+            self.timestamp = time.time()
 
 # Suppress the LangGraphDeprecatedSinceV10 warning about create_react_agent migration.
 # The recommended replacement (langchain.agents.create_react_agent) doesn't exist yet in 1.2.0.
@@ -887,17 +920,101 @@ Example response:
 
     def agent_node(self, state: CustomAgentState) -> Dict[str, Any]:
         """
-        Agent reasoning node - calls LLM with tool binding.
+        Agent reasoning node - calls LLM with tool binding and true streaming support.
+
+        Supports both streaming and non-streaming LLM implementations:
+        - If LLM has .stream() method: Uses true LLM streaming with event emission
+        - If LLM only has .invoke(): Falls back to standard invoke method
         """
         messages = state["messages"]
 
         # Bind tools to LLM
         llm_with_tools = self.llm.bind_tools(self.tools)
 
-        # Call LLM
-        response = llm_with_tools.invoke(messages)
+        # Check if the LLM supports streaming
+        if hasattr(llm_with_tools, "stream") and callable(getattr(llm_with_tools, "stream")):
+            # Use true LLM streaming
+            response = self._stream_llm_response(llm_with_tools, messages)
+        else:
+            # Fall back to invoke() for non-streaming LLMs
+            response = llm_with_tools.invoke(messages)
 
         return {"messages": [response]}
+
+    def _stream_llm_response(self, llm_with_tools, messages: Sequence[BaseMessage]) -> AIMessage:
+        """
+        Stream the LLM response and accumulate the full response while emitting events.
+
+        Emits streaming events as content is received from the LLM:
+        - LLMResponseStartEvent: When streaming begins
+        - LLMResponseChunkEvent: For each content chunk (with is_complete=False)
+        - LLMResponseChunkEvent: Final empty chunk (with is_complete=True)
+
+        Args:
+            llm_with_tools: The LLM instance with tools bound
+            messages: The input messages for the LLM
+
+        Returns:
+            The accumulated AIMessage response
+        """
+        # Emit start event
+        start_event = LLMResponseStartEvent()
+        self._emit_streaming_event(start_event)
+
+        # Accumulate response content
+        accumulated_content = ""
+        chunk = None
+
+        try:
+            # Stream from the LLM
+            for chunk in llm_with_tools.stream(messages):
+                # Extract content from chunk
+                # LangChain streams return different chunk types
+                if hasattr(chunk, "content") and chunk.content:
+                    content = chunk.content
+                    accumulated_content += content
+
+                    # Emit chunk event
+                    chunk_event = LLMResponseChunkEvent(content=content, is_complete=False)
+                    self._emit_streaming_event(chunk_event)
+
+        except Exception as e:
+            logger.warning(f"Error during LLM streaming: {e}. Falling back to invoke.")
+            # Fall back to invoke if streaming fails
+            chunk = llm_with_tools.invoke(messages)
+            accumulated_content = chunk.content if hasattr(chunk, "content") else str(chunk)
+
+        # Emit completion event
+        completion_event = LLMResponseChunkEvent(content="", is_complete=True)
+        self._emit_streaming_event(completion_event)
+
+        # Return the accumulated response as an AIMessage
+        # If chunk is already an AIMessage from the last iteration, use it
+        # Otherwise, construct one from accumulated content
+        if chunk and isinstance(chunk, AIMessage):
+            return chunk
+        else:
+            return AIMessage(content=accumulated_content)
+
+    def _emit_streaming_event(self, event: LLMStreamingEvent) -> None:
+        """
+        Emit a streaming event (for future integration with WebSocket or event listeners).
+
+        Currently logs the event. Can be extended to:
+        - Send events to WebSocket clients
+        - Broadcast to observability systems
+        - Update real-time dashboards
+
+        Args:
+            event: The streaming event to emit
+        """
+        if isinstance(event, LLMResponseStartEvent):
+            logger.debug("LLM streaming started")
+        elif isinstance(event, LLMResponseChunkEvent):
+            if event.is_complete:
+                logger.debug("LLM streaming complete")
+            else:
+                logger.debug(f"LLM chunk received: {len(event.content)} chars")
 
     def tools_node(self, state: CustomAgentState) -> Dict[str, Any]:
         """
@@ -936,15 +1053,21 @@ Example response:
 
                 # Apply reranking if enabled
                 if ENABLE_RERANKING and self.reranker and results:
-                    # Capture original order for comparison
+                    # Capture original order for comparison and store original ranks
                     original_sources = [doc.metadata.get('source', 'unknown') for doc in results]
+                    for i, doc in enumerate(results, 1):
+                        doc.metadata['original_rank'] = i
 
                     print(f"\n[Reranker] Processing {len(results)} candidates...")
                     reranked_results = self.reranker.rerank(query, results, RERANKER_TOP_K)
 
-                    # Extract documents with scores for logging
+                    # Extract documents with scores and store in metadata
                     results_with_scores = [(doc, score) for doc, score in reranked_results]
                     results = [doc for doc, score in results_with_scores]
+
+                    # Store reranker scores in metadata and update metadata for observability
+                    for i, (doc, score) in enumerate(results_with_scores, 1):
+                        doc.metadata['reranker_score'] = score
 
                     # Log reranking results with scores
                     print(f"[Reranker] Reranking complete → top {len(results)} selected:")
@@ -1139,6 +1262,7 @@ Example response:
         Transform/rewrite the query for better retrieval results.
 
         Called when document grading fails and retry is allowed.
+        Uses both positive and negative feedback to learn from success and failure.
         """
         if not ENABLE_REFLECTION or not ENABLE_QUERY_TRANSFORMATION:
             return {}
@@ -1146,23 +1270,59 @@ Example response:
         original_query = state.get("original_query", "")
         document_grades = state.get("document_grades", [])
 
-        # Build context about what failed
-        failed_reasons = [
-            g["reasoning"] for g in document_grades if not g["relevant"]
-        ]
+        # Extract relevant and irrelevant documents
+        relevant_docs = [g for g in document_grades if g["relevant"]]
+        irrelevant_docs = [g for g in document_grades if not g["relevant"]]
 
+        # Sort by score (highest first) to get top quality examples
+        relevant_docs_sorted = sorted(
+            relevant_docs,
+            key=lambda x: x.get("score", 0.5),
+            reverse=True
+        )
+        irrelevant_docs_sorted = sorted(
+            irrelevant_docs,
+            key=lambda x: x.get("score", 0.5),
+            reverse=True
+        )
+
+        # Build positive feedback section
+        positive_feedback = ""
+        if relevant_docs_sorted:
+            top_relevant = relevant_docs_sorted[:2]
+            positive_feedback = "DOCUMENTS THAT WERE RELEVANT:\n"
+            for doc in top_relevant:
+                positive_feedback += f"- {doc['reasoning']}\n"
+
+        # Build negative feedback section
+        negative_feedback = ""
+        if irrelevant_docs_sorted:
+            top_irrelevant = irrelevant_docs_sorted[:3]
+            negative_feedback = "DOCUMENTS THAT WERE NOT RELEVANT:\n"
+            for doc in top_irrelevant:
+                negative_feedback += f"- {doc['reasoning']}\n"
+
+        # Build the enhanced transformation prompt
         transform_prompt = f"""Rewrite this search query to improve document retrieval.
 
 Original Query: {original_query}
 
-The initial search returned documents that were not relevant because:
-{chr(10).join(f"- {r}" for r in failed_reasons[:3])}
+Learning from what worked and what didn't:
+
+{positive_feedback}
+
+{negative_feedback}
 
 Write a new query that:
-1. Captures the same user intent
-2. Uses different keywords/synonyms
-3. Is more specific or more general as needed
-4. Focuses on core concepts
+1. Preserves the aspects and keywords that led to RELEVANT documents
+2. Avoids terms and phrasings that led to irrelevant results
+3. Emphasizes what worked in the relevant documents
+4. Captures the same user intent but more effectively
+5. Uses different keywords/synonyms where needed
+6. Is more specific or more general as appropriate
+
+Focus on: What made the relevant documents relevant? Amplify those signals.
+Avoid: What made other documents irrelevant? Don't repeat those patterns.
 
 Respond with ONLY the rewritten query, nothing else."""
 
@@ -1174,7 +1334,8 @@ Respond with ONLY the rewritten query, nothing else."""
             transformed = original_query  # Fallback to original
 
         if REFLECTION_SHOW_STATUS:
-            print(f"[Query Transformer] '{original_query}' → '{transformed}'")
+            feedback_info = f"({len(relevant_docs)} relevant, {len(irrelevant_docs)} irrelevant)"
+            print(f"[Query Transformer] {feedback_info} '{original_query}' → '{transformed}'")
 
         # Increment iteration count
         new_iteration = state.get("iteration_count", 0) + 1
@@ -1637,10 +1798,58 @@ Title:"""
         except Exception:
             return 0
 
+    def _fallback_summarize(self, messages_to_summarize: Sequence[BaseMessage]) -> str:
+        """
+        Create a simple fallback summary when LLM summarization fails.
+        Uses basic heuristics to extract key information without LLM.
+
+        Args:
+            messages_to_summarize: Sequence of messages to summarize.
+
+        Returns:
+            A simple summary of the conversation.
+        """
+        if not messages_to_summarize:
+            return "No earlier context"
+
+        # Extract user questions and assistant topics
+        user_topics = []
+        assistant_topics = []
+
+        for msg in messages_to_summarize:
+            if hasattr(msg, "content") and msg.content:
+                content_preview = str(msg.content)[:100].strip()
+                if hasattr(msg, "type"):
+                    if msg.type == "human":
+                        user_topics.append(content_preview)
+                    else:
+                        assistant_topics.append(content_preview)
+                else:
+                    if "human" in str(type(msg)).lower():
+                        user_topics.append(content_preview)
+                    else:
+                        assistant_topics.append(content_preview)
+
+        # Build simple summary
+        summary_parts = [f"Earlier conversation ({len(messages_to_summarize)} messages):"]
+
+        if user_topics:
+            summary_parts.append(f"User asked about: {', '.join(user_topics[:3])}")
+            if len(user_topics) > 3:
+                summary_parts.append(f"(and {len(user_topics) - 3} more topics)")
+
+        if assistant_topics:
+            summary_parts.append(f"Assistant discussed: {', '.join(assistant_topics[:3])}")
+            if len(assistant_topics) > 3:
+                summary_parts.append(f"(and {len(assistant_topics) - 3} more topics)")
+
+        return ". ".join(summary_parts)
+
     def summarize_messages(self, messages_to_summarize: Sequence[BaseMessage]) -> str:
         """
         Use LLM to create a concise summary of older messages.
         Preserves key facts and context while being brief.
+        Falls back to simple summaries if LLM fails.
 
         Args:
             messages_to_summarize: Sequence of messages to summarize.
@@ -1648,10 +1857,10 @@ Title:"""
         Returns:
             A concise summary of the message content.
         """
-        try:
-            if not messages_to_summarize:
-                return "No earlier context"
+        if not messages_to_summarize:
+            return "No earlier context"
 
+        try:
             # Build context of messages to summarize
             context = ""
             for msg in messages_to_summarize:
@@ -1677,8 +1886,50 @@ Summary:"""
             response = self.llm.invoke(summary_prompt)
             return response.content if hasattr(response, "content") else str(response)
 
+        except httpx.ConnectError as e:
+            logger.error(
+                f"Connection error while summarizing {len(messages_to_summarize)} messages: {e}",
+                exc_info=True
+            )
+            logger.info("Falling back to simple concatenation summary")
+            return self._fallback_summarize(messages_to_summarize)
+
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(
+                f"JSON/parsing error while summarizing {len(messages_to_summarize)} messages: {e}",
+                exc_info=True
+            )
+            logger.info("Falling back to word count summary")
+            return self._fallback_summarize(messages_to_summarize)
+
+        except TimeoutError as e:
+            logger.error(
+                f"Timeout while summarizing {len(messages_to_summarize)} messages: {e}",
+                exc_info=True
+            )
+            logger.info("Falling back to first/last message summary")
+            # Get first and last messages
+            first_msg = ""
+            last_msg = ""
+            if messages_to_summarize:
+                if hasattr(messages_to_summarize[0], "content"):
+                    first_msg = str(messages_to_summarize[0].content)[:80]
+                if hasattr(messages_to_summarize[-1], "content"):
+                    last_msg = str(messages_to_summarize[-1].content)[:80]
+            summary = f"Earlier conversation ({len(messages_to_summarize)} messages): "
+            if first_msg:
+                summary += f"Started with: {first_msg}. "
+            if last_msg:
+                summary += f"Ended with: {last_msg}"
+            return summary
+
         except Exception as e:
-            return f"[Unable to summarize {len(messages_to_summarize)} messages]"
+            logger.error(
+                f"Unexpected error while summarizing {len(messages_to_summarize)} messages: {type(e).__name__}: {e}",
+                exc_info=True
+            )
+            logger.info("Falling back to basic summary")
+            return self._fallback_summarize(messages_to_summarize)
 
     def compact_conversation_if_needed(self, messages: Sequence[BaseMessage]) -> Tuple[Sequence[BaseMessage], bool, int]:
         """
@@ -1720,7 +1971,16 @@ Summary:"""
 
         # Return compacted messages
         compacted = [summary_msg] + messages_to_keep
-        return compacted, True, len(messages_to_compact)
+        num_compacted = len(messages_to_compact)
+
+        # Log compaction completion with token counts
+        compacted_token_count = self.estimate_token_count(compacted)
+        logger.info(
+            f"Compacted {num_compacted} messages "
+            f"(token count: {compacted_token_count}/{MAX_CONTEXT_TOKENS})"
+        )
+
+        return compacted, True, num_compacted
 
     def run_conversation(self):
         """Run the interactive conversation loop"""
@@ -1932,19 +2192,18 @@ Summary:"""
 
     def _stream_text(self, text: str, chunk_size: int = 1) -> None:
         """
-        Stream text output character by character for real-time streaming effect.
+        Display text output from LLM response without artificial delays.
 
-        Creates an engaging user experience by displaying text as it's "generated",
-        with a small delay between characters for visual feedback.
+        Previously used character-by-character delays for simulated streaming.
+        Now displays text immediately as it's received from true LLM streaming.
 
         Args:
-            text: The text to stream to the console.
+            text: The text to display to the console.
             chunk_size: Not used in current implementation (kept for compatibility).
         """
-        # Stream character by character with minimal delay for real-time feel
-        for char in text:
-            print(char, end="", flush=True)
-            time.sleep(0.005)  # Small delay between characters
+        # Display text immediately without artificial delays
+        # True streaming happens via _stream_llm_response and LLM chunk events
+        print(text)
         print()  # Final newline
 
     def run(self):

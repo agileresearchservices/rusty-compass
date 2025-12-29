@@ -34,6 +34,7 @@ interface ObservabilityState {
   // UI state
   activeTab: 'steps' | 'graph' | 'metrics'
   expandedSteps: Set<string>
+  expandedEvents: Set<string>
 
   // Actions
   startExecution: () => void
@@ -43,6 +44,7 @@ interface ObservabilityState {
   endNode: (node: NodeName, durationMs: number, summary?: string) => void
   setActiveTab: (tab: 'steps' | 'graph' | 'metrics') => void
   toggleStepExpanded: (stepId: string) => void
+  toggleEventExpanded: (eventId: string) => void
   clearState: () => void
 }
 
@@ -59,6 +61,7 @@ export const useObservabilityStore = create<ObservabilityState>((set, get) => ({
   metrics: null,
   activeTab: 'steps',
   expandedSteps: new Set(),
+  expandedEvents: new Set(),
 
   // Actions
   startExecution: () => set({
@@ -182,6 +185,16 @@ export const useObservabilityStore = create<ObservabilityState>((set, get) => ({
     return { expandedSteps }
   }),
 
+  toggleEventExpanded: (eventId) => set((state) => {
+    const expandedEvents = new Set(state.expandedEvents)
+    if (expandedEvents.has(eventId)) {
+      expandedEvents.delete(eventId)
+    } else {
+      expandedEvents.add(eventId)
+    }
+    return { expandedEvents }
+  }),
+
   clearState: () => set({
     isExecuting: false,
     currentNode: null,
@@ -193,5 +206,6 @@ export const useObservabilityStore = create<ObservabilityState>((set, get) => ({
     responseGrading: null,
     metrics: null,
     expandedSteps: new Set(),
+    expandedEvents: new Set(),
   }),
 }))
