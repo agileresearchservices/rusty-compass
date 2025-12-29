@@ -302,6 +302,7 @@ class CustomAgentState(TypedDict):
     # Query evaluation state
     lambda_mult: float
     query_analysis: str
+    optimized_query: Optional[str]                # Pre-optimized query from evaluator
 
     # Reflection state
     iteration_count: int                          # Track retrieval iterations (0, 1, or 2)
@@ -850,46 +851,36 @@ class LangChainAgent:
 
         if not last_user_msg:
             # No user message, use default
-            return {"lambda_mult": 0.25, "query_analysis": "No query detected"}
+            return {
+                "lambda_mult": 0.25,
+                "query_analysis": "No query detected",
+                "optimized_query": None
+            }
 
         print(f"\n[Query Evaluator] Starting evaluation for query: '{last_user_msg[:80]}...'")
 
         # LLM evaluation prompt
-        evaluation_prompt = f"""Analyze this search query and determine the optimal search strategy by setting a lambda_mult value between 0.0 and 1.0.
+        evaluation_prompt = f"""Analyze this search query and determine the optimal search strategy AND optimized query.
 
 Query: "{last_user_msg}"
 
-Lambda_mult Guidelines (0.0=pure lexical/BM25, 1.0=pure semantic/vector):
-- 0.0-0.2: Pure LEXICAL search
-  * Use for: dates, model numbers, part numbers, exact product identifiers
-  * Example: "GPT-4 released in 2023" → 0.05
-  * Example: "Model XR-2500 specifications" → 0.1
+Lambda_mult Guidelines (0.0=lexical, 1.0=semantic):
+- 0.0-0.2: Pure LEXICAL - Extract exact terms, preserve identifiers
+- 0.2-0.4: LEXICAL-heavy - Preserve key terms, add keywords
+- 0.4-0.6: BALANCED - Balance keywords and natural language
+- 0.6-0.8: SEMANTIC-heavy - Preserve natural language, clarify intent
+- 0.8-1.0: Pure SEMANTIC - PRESERVE NATURAL LANGUAGE (minimal changes)
 
-- 0.2-0.4: LEXICAL-heavy search
-  * Use for: specific versions, brands, frameworks, library updates
-  * Example: "Django 4.2 authentication" → 0.3
-  * Example: "Python 3.11 new features" → 0.25
+CRITICAL RULES:
+1. lambda >= 0.8: Keep query nearly identical
+2. lambda >= 0.6: Keep most natural language
+3. lambda <= 0.4: Optimize for keywords
+4. lambda <= 0.2: Heavy keyword extraction
+5. ALWAYS maintain user intent
 
-- 0.4-0.6: BALANCED hybrid search
-  * Use for: mixed queries with both specific terms and concepts
-  * Example: "Python Flask REST API tutorial" → 0.5
-  * Example: "React hooks best practices" → 0.45
-
-- 0.6-0.8: SEMANTIC-heavy search
-  * Use for: conceptual guides, optimization techniques, framework discussions
-  * Example: "PostgreSQL query optimization techniques" → 0.65
-  * Example: "Docker containerization guide" → 0.6
-
-- 0.8-1.0: Pure SEMANTIC search
-  * Use for: conceptual questions, "what is", "explain", "how does", "why"
-  * Example: "What is machine learning?" → 0.95
-  * Example: "Explain how neural networks learn" → 0.9
-
-Respond with ONLY a JSON object in this format:
-{{"lambda_mult": <float between 0.0 and 1.0>, "reasoning": "<brief explanation>"}}
-
-Example response:
-{{"lambda_mult": 0.85, "reasoning": "Conceptual question about machine learning requires semantic understanding"}}"""
+Respond with ONLY JSON:
+{{"lambda_mult": <0.0-1.0>, "reasoning": "<brief explanation>", "optimized_query": "<optimized query>"}}
+"""
 
         try:
             # Call LLM for evaluation
@@ -901,6 +892,7 @@ Example response:
 
             lambda_mult = float(result["lambda_mult"])
             reasoning = result.get("reasoning", "No reasoning provided")
+            optimized_query = result.get("optimized_query", last_user_msg)
 
             # Validate range
             lambda_mult = max(0.0, min(1.0, lambda_mult))
@@ -920,11 +912,14 @@ Example response:
             elapsed = time.time() - start_time
             print(f"[Query Evaluator] ✓ Strategy: {strategy}")
             print(f"  Lambda: {lambda_mult:.2f} | Reasoning: {reasoning}")
+            print(f"  Original: '{last_user_msg}'")
+            print(f"  Optimized: '{optimized_query}'")
             print(f"  Evaluation time: {elapsed:.3f}s")
 
             return {
                 "lambda_mult": lambda_mult,
-                "query_analysis": reasoning
+                "query_analysis": reasoning,
+                "optimized_query": optimized_query
             }
 
         except Exception as e:
@@ -935,7 +930,8 @@ Example response:
             print(f"  Evaluation time: {elapsed:.3f}s")
             return {
                 "lambda_mult": 0.25,
-                "query_analysis": f"Evaluation failed: {str(e)}"
+                "query_analysis": f"Evaluation failed: {str(e)}",
+                "optimized_query": last_user_msg
             }
 
     def agent_node(self, state: CustomAgentState) -> Dict[str, Any]:
@@ -951,29 +947,61 @@ Example response:
 
         print(f"\n[Agent Node] Processing {len(messages)} messages...")
 
-        # Inject Query Evaluator's recommendation as system context
-        # This informs the Agent whether semantic or hybrid search is optimal
+        # Inject Query Evaluator's recommendation with pre-optimized query
+        # This provides stronger guidance including the actual optimized query
         lambda_mult = state.get("lambda_mult", 0.25)
         query_analysis = state.get("query_analysis", "")
+        optimized_query = state.get("optimized_query", "")
 
+        # Create search strategy message based on lambda ranges
         if lambda_mult >= 0.8:
             # Pure semantic search - preserve natural language queries
-            search_hint = f"This query requires PURE SEMANTIC search (lambda={lambda_mult:.2f}). Preserve the user's natural language query as-is for vector-based retrieval. Do NOT rewrite to keywords. Reasoning: {query_analysis}"
+            search_hint = f"""SEARCH STRATEGY: Pure SEMANTIC (lambda={lambda_mult:.2f})
+
+Pre-optimized query (USE EXACT):
+"{optimized_query}"
+
+DO NOT rewrite. Optimized for semantic vector search.
+Reasoning: {query_analysis}"""
         elif lambda_mult >= 0.6:
             # Semantic-heavy search - mostly natural language
-            search_hint = f"This query requires SEMANTIC-HEAVY search (lambda={lambda_mult:.2f}). Preserve most of the user's natural language while removing noise. Reasoning: {query_analysis}"
+            search_hint = f"""SEARCH STRATEGY: Semantic-Heavy (lambda={lambda_mult:.2f})
+
+Pre-optimized query (use as-is):
+"{optimized_query}"
+
+Mostly optimized for semantic search. Preserve natural language.
+Reasoning: {query_analysis}"""
         elif lambda_mult >= 0.4:
             # Balanced hybrid search - can optimize both
-            search_hint = f"This query requires BALANCED HYBRID search (lambda={lambda_mult:.2f}). You may optimize the query for both semantic and lexical search. Reasoning: {query_analysis}"
+            search_hint = f"""SEARCH STRATEGY: Balanced Hybrid (lambda={lambda_mult:.2f})
+
+Pre-optimized query (prefer using as-is):
+"{optimized_query}"
+
+Balanced for both semantic and lexical search. Can optimize slightly if needed.
+Reasoning: {query_analysis}"""
         elif lambda_mult >= 0.2:
             # Lexical-heavy search - keyword optimization is fine
-            search_hint = f"This query requires LEXICAL-HEAVY search (lambda={lambda_mult:.2f}). Optimize the query for keyword/BM25 matching. Reasoning: {query_analysis}"
+            search_hint = f"""SEARCH STRATEGY: Lexical-Heavy (lambda={lambda_mult:.2f})
+
+Pre-optimized query (use in knowledge_base):
+"{optimized_query}"
+
+Optimized for keyword/BM25 matching. Can refine for lexical search.
+Reasoning: {query_analysis}"""
         else:
             # Pure lexical search - heavy keyword optimization
-            search_hint = f"This query requires PURE LEXICAL search (lambda={lambda_mult:.2f}). Heavily optimize for exact term matching. Reasoning: {query_analysis}"
+            search_hint = f"""SEARCH STRATEGY: Pure Lexical (lambda={lambda_mult:.2f})
 
-        # Add search strategy hint as system message if we have lambda evaluation
-        if query_analysis:
+Pre-optimized query (use exactly as provided):
+"{optimized_query}"
+
+Heavily optimized for exact term matching. Use with high precision.
+Reasoning: {query_analysis}"""
+
+        # Add search strategy with optimized query as system message if we have lambda evaluation
+        if query_analysis and optimized_query:
             messages.insert(0, SystemMessage(content=search_hint))
 
         # Bind tools to LLM
@@ -1130,8 +1158,19 @@ Example response:
 
             if tool_name == "knowledge_base":
                 query = tool_args.get("query", "")
+                optimized_query = state.get("optimized_query")
 
-                print(f"\n[Retrieval] Query: '{query}'")
+                # Log query usage
+                if optimized_query:
+                    if query == optimized_query:
+                        print(f"\n[Retrieval] ✓ Using optimized query: '{query}'")
+                    else:
+                        print(f"\n[Retrieval] ⚠ Query mismatch:")
+                        print(f"  Expected: '{optimized_query}'")
+                        print(f"  Received: '{query}'")
+                else:
+                    print(f"\n[Retrieval] Query: '{query}'")
+
                 print(f"[Retrieval] Search strategy: Lambda={lambda_mult:.2f}")
 
                 # Create retriever with dynamic lambda_mult
@@ -1467,6 +1506,7 @@ Respond with ONLY the rewritten query, nothing else."""
             "iteration_count": new_iteration,
             "messages": [retry_message],
             "lambda_mult": 0.5,  # Reset to balanced for retry
+            "optimized_query": None,  # Clear to force re-evaluation
             "retrieved_documents": [],  # Clear previous documents
             "document_grades": [],
             "document_grade_summary": {}
@@ -2224,6 +2264,7 @@ Summary:"""
                 "messages": [("user", user_input)],
                 "lambda_mult": 0.25,  # Default, will be overridden by query_evaluator
                 "query_analysis": "",
+                "optimized_query": None,  # Will be set by query_evaluator_node
                 # Reflection state initialization
                 "iteration_count": 0,
                 "response_retry_count": 0,
