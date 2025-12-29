@@ -947,9 +947,34 @@ Example response:
         - If LLM only has .invoke(): Falls back to standard invoke method
         """
         start_time = time.time()
-        messages = state["messages"]
+        messages = list(state["messages"])
 
         print(f"\n[Agent Node] Processing {len(messages)} messages...")
+
+        # Inject Query Evaluator's recommendation as system context
+        # This informs the Agent whether semantic or hybrid search is optimal
+        lambda_mult = state.get("lambda_mult", 0.25)
+        query_analysis = state.get("query_analysis", "")
+
+        if lambda_mult >= 0.8:
+            # Pure semantic search - preserve natural language queries
+            search_hint = f"This query requires PURE SEMANTIC search (lambda={lambda_mult:.2f}). Preserve the user's natural language query as-is for vector-based retrieval. Do NOT rewrite to keywords. Reasoning: {query_analysis}"
+        elif lambda_mult >= 0.6:
+            # Semantic-heavy search - mostly natural language
+            search_hint = f"This query requires SEMANTIC-HEAVY search (lambda={lambda_mult:.2f}). Preserve most of the user's natural language while removing noise. Reasoning: {query_analysis}"
+        elif lambda_mult >= 0.4:
+            # Balanced hybrid search - can optimize both
+            search_hint = f"This query requires BALANCED HYBRID search (lambda={lambda_mult:.2f}). You may optimize the query for both semantic and lexical search. Reasoning: {query_analysis}"
+        elif lambda_mult >= 0.2:
+            # Lexical-heavy search - keyword optimization is fine
+            search_hint = f"This query requires LEXICAL-HEAVY search (lambda={lambda_mult:.2f}). Optimize the query for keyword/BM25 matching. Reasoning: {query_analysis}"
+        else:
+            # Pure lexical search - heavy keyword optimization
+            search_hint = f"This query requires PURE LEXICAL search (lambda={lambda_mult:.2f}). Heavily optimize for exact term matching. Reasoning: {query_analysis}"
+
+        # Add search strategy hint as system message if we have lambda evaluation
+        if query_analysis:
+            messages.insert(0, SystemMessage(content=search_hint))
 
         # Bind tools to LLM
         llm_with_tools = self.llm.bind_tools(self.tools)
@@ -1020,6 +1045,13 @@ Example response:
                     chunk_event = LLMResponseChunkEvent(content=chunk.content, is_complete=False)
                     self._emit_streaming_event(chunk_event)
 
+        except StopIteration:
+            # Normal generator exhaustion - not an error, continue
+            pass
+        except RuntimeError as e:
+            # Ignore RuntimeError from StopIteration (Python 3.7+ async context)
+            if "StopIteration" not in str(e):
+                logger.warning(f"RuntimeError during LLM streaming: {e}. Falling back to invoke.")
         except Exception as e:
             logger.warning(f"Exception during LLM streaming: {e}. Falling back to invoke.")
 
