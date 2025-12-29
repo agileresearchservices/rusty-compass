@@ -2,18 +2,20 @@
  * DocumentGraderDetails - Shows document grading results.
  */
 
-import { useObservabilityStore } from '../../../stores/observabilityStore'
 import { CheckCircle, XCircle } from 'lucide-react'
 import clsx from 'clsx'
+import type { ObservabilityStep, DocumentGradingSummaryEvent, DocumentGradeEvent } from '../../../types/events'
 
-export function DocumentGraderDetails() {
-  const { documentGradingSummary, steps } = useObservabilityStore()
+interface DocumentGraderDetailsProps {
+  step: ObservabilityStep
+}
 
-  // Extract document grades from step events
-  const graderStep = steps.find((s) => s.node === 'document_grader')
-  const gradeEvents = graderStep?.events.filter((e) => e.type === 'document_grade') || []
+export function DocumentGraderDetails({ step }: DocumentGraderDetailsProps) {
+  // Extract document grades from the specific step's events (not global state)
+  const gradeEvents = step.events.filter((e) => e.type === 'document_grade') as DocumentGradeEvent[]
+  const summaryEvent = step.events.find((e) => e.type === 'document_grading_summary') as DocumentGradingSummaryEvent | undefined
 
-  if (!documentGradingSummary) {
+  if (!summaryEvent) {
     return (
       <div className="text-sm text-gray-500">
         Waiting for document grading...
@@ -21,7 +23,7 @@ export function DocumentGraderDetails() {
     )
   }
 
-  const { grade, relevant_count, total_count, average_score, reasoning } = documentGradingSummary
+  const { grade, relevant_count, total_count, average_score, reasoning } = summaryEvent
   const passed = grade === 'pass'
 
   return (
@@ -78,32 +80,24 @@ export function DocumentGraderDetails() {
         <div className="space-y-2">
           <span className="text-xs text-gray-500">Document Grades:</span>
           <div className="space-y-1">
-            {gradeEvents.map((event, index) => {
-              const e = event as {
-                source: string
-                relevant: boolean
-                score: number
-                reasoning: string
-              }
-              return (
-                <div
-                  key={index}
-                  className="flex items-center gap-2 text-xs bg-gray-800/50 rounded p-2"
-                >
-                  {e.relevant ? (
-                    <CheckCircle className="w-3 h-3 text-emerald-400 flex-shrink-0" />
-                  ) : (
-                    <XCircle className="w-3 h-3 text-red-400 flex-shrink-0" />
-                  )}
-                  <span className="text-gray-300 truncate flex-1">
-                    {e.source}
-                  </span>
-                  <span className="text-gray-500">
-                    {(e.score * 100).toFixed(0)}%
-                  </span>
-                </div>
-              )
-            })}
+            {gradeEvents.map((event, index) => (
+              <div
+                key={index}
+                className="flex items-center gap-2 text-xs bg-gray-800/50 rounded p-2"
+              >
+                {event.relevant ? (
+                  <CheckCircle className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                ) : (
+                  <XCircle className="w-3 h-3 text-red-400 flex-shrink-0" />
+                )}
+                <span className="text-gray-300 truncate flex-1">
+                  {event.source}
+                </span>
+                <span className="text-gray-500">
+                  {(event.score * 100).toFixed(0)}%
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}

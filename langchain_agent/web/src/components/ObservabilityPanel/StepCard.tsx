@@ -148,7 +148,7 @@ function StepDetails({ step }: { step: ObservabilityStep }) {
       return <SearchDetails />
 
     case 'document_grader':
-      return <DocumentGraderDetails />
+      return <DocumentGraderDetails step={step} />
 
     case 'response_grader':
       return <ResponseGraderDetails />
