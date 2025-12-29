@@ -4,11 +4,50 @@
 
 import { useEffect, useRef } from 'react'
 import { useChatStore } from '../../stores/chatStore'
+import { useObservabilityStore } from '../../stores/observabilityStore'
 import { Message } from './Message'
 
 export function MessageList() {
   const { messages, streamingContent, isProcessing } = useChatStore()
+  const { currentNode, steps } = useObservabilityStore()
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Map node IDs to user-friendly display names
+  const getNodeDisplayName = (node: string): string => {
+    const names: Record<string, string> = {
+      query_evaluator: 'Evaluating query',
+      agent: 'Planning response',
+      tools: 'Searching documents',
+      document_grader: 'Grading documents',
+      response_grader: 'Checking response quality',
+      query_transformer: 'Refining search',
+      response_improver: 'Improving response',
+    }
+    return names[node] || 'Processing'
+  }
+
+  // Get a brief summary of the current step
+  const getCurrentStepSummary = (): string | null => {
+    if (!currentNode || !steps.length) return null
+    const currentStep = steps.find(s => s.label === currentNode)
+    if (!currentStep || !currentStep.events.length) return null
+
+    // Get the most recent event for this step
+    const latestEvent = currentStep.events[currentStep.events.length - 1]
+
+    // Extract summary based on event type
+    if (latestEvent?.data?.document_count !== undefined) {
+      return `Found ${latestEvent.data.document_count} candidates`
+    }
+    if (latestEvent?.data?.relevant_count !== undefined) {
+      return `${latestEvent.data.relevant_count}/${latestEvent.data.total_count} relevant`
+    }
+    if (latestEvent?.data?.score !== undefined) {
+      return `Score: ${(latestEvent.data.score * 100).toFixed(0)}%`
+    }
+
+    return null
+  }
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -57,11 +96,22 @@ export function MessageList() {
       {isProcessing && !streamingContent && messages[messages.length - 1]?.role !== 'assistant' && (
         <div className="flex items-center gap-2 text-gray-500">
           <div className="flex gap-1">
-            <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-            <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-            <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
           </div>
-          <span className="text-sm">Agent is thinking...</span>
+          <div className="text-sm">
+            {currentNode ? (
+              <span className="flex items-center gap-2">
+                <span className="font-medium text-blue-400">
+                  {getNodeDisplayName(currentNode)}
+                </span>
+                {getCurrentStepSummary() && (
+                  <span className="text-gray-600">• {getCurrentStepSummary()}</span>
+                )}
+              </span>
+            ) : (
+              <span>Agent is thinking...</span>
+            )}
+          </div>
         </div>
       )}
 

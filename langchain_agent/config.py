@@ -332,4 +332,4 @@ RESPONSE_GRADING_LOW_CONFIDENCE_RETRY = 0.5
 #   - Emits NodeEndEvent with accurate timing after processing
 #   - TRADEOFF: Timing may be slightly less accurate than legacy mode, but
 #     provides better UI responsiveness and prevents async event loop blocking
-ENABLE_ASYNC_STREAMING = False
+ENABLE_ASYNC_STREAMING = True
