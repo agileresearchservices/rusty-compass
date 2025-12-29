@@ -762,7 +762,7 @@ class LangChainAgent:
             temperature=LLM_TEMPERATURE,
             base_url=OLLAMA_BASE_URL,
             streaming=True,
-            num_predict=1024,  # Allow longer thinking/reasoning
+            num_predict=4096,  # Allow comprehensive responses (increased from 1024 to prevent truncation)
             reasoning=REASONING_ENABLED,
             reasoning_effort=REASONING_EFFORT if REASONING_ENABLED else None,
         )
@@ -838,6 +838,7 @@ class LangChainAgent:
         - 0.6-0.8: Semantic-heavy (framework guides, optimization techniques)
         - 0.8-1.0: Pure semantic (conceptual questions, "what is", "explain")
         """
+        start_time = time.time()
         messages = state["messages"]
 
         # Extract last user message
@@ -850,6 +851,8 @@ class LangChainAgent:
         if not last_user_msg:
             # No user message, use default
             return {"lambda_mult": 0.25, "query_analysis": "No query detected"}
+
+        print(f"\n[Query Evaluator] Starting evaluation for query: '{last_user_msg[:80]}...'")
 
         # LLM evaluation prompt
         evaluation_prompt = f"""Analyze this search query and determine the optimal search strategy by setting a lambda_mult value between 0.0 and 1.0.
@@ -902,8 +905,22 @@ Example response:
             # Validate range
             lambda_mult = max(0.0, min(1.0, lambda_mult))
 
-            # Log evaluation (optional for debugging)
-            print(f"[Query Evaluator] Lambda: {lambda_mult:.2f} | {reasoning}")
+            # Categorize search strategy
+            if lambda_mult < 0.2:
+                strategy = "Pure Lexical (BM25)"
+            elif lambda_mult < 0.4:
+                strategy = "Lexical-Heavy (BM25 dominant)"
+            elif lambda_mult < 0.6:
+                strategy = "Balanced (Hybrid)"
+            elif lambda_mult < 0.8:
+                strategy = "Semantic-Heavy (Vector dominant)"
+            else:
+                strategy = "Pure Semantic (Vector)"
+
+            elapsed = time.time() - start_time
+            print(f"[Query Evaluator] ✓ Strategy: {strategy}")
+            print(f"  Lambda: {lambda_mult:.2f} | Reasoning: {reasoning}")
+            print(f"  Evaluation time: {elapsed:.3f}s")
 
             return {
                 "lambda_mult": lambda_mult,
@@ -912,7 +929,10 @@ Example response:
 
         except Exception as e:
             # Fallback to default if evaluation fails
-            print(f"⚠ Query evaluation failed: {e}. Using default lambda=0.25")
+            elapsed = time.time() - start_time
+            print(f"[Query Evaluator] ⚠ Evaluation failed: {e}")
+            print(f"  Using default lambda=0.25 (Balanced search)")
+            print(f"  Evaluation time: {elapsed:.3f}s")
             return {
                 "lambda_mult": 0.25,
                 "query_analysis": f"Evaluation failed: {str(e)}"
@@ -926,7 +946,10 @@ Example response:
         - If LLM has .stream() method: Uses true LLM streaming with event emission
         - If LLM only has .invoke(): Falls back to standard invoke method
         """
+        start_time = time.time()
         messages = state["messages"]
+
+        print(f"\n[Agent Node] Processing {len(messages)} messages...")
 
         # Bind tools to LLM
         llm_with_tools = self.llm.bind_tools(self.tools)
@@ -937,7 +960,22 @@ Example response:
             response = self._stream_llm_response(llm_with_tools, messages)
         else:
             # Fall back to invoke() for non-streaming LLMs
+            print(f"[Agent Node] LLM does not support streaming, using invoke()")
             response = llm_with_tools.invoke(messages)
+
+        # Calculate response statistics
+        response_length = len(response.content) if hasattr(response, "content") else 0
+        tool_calls = len(response.tool_calls) if hasattr(response, "tool_calls") and response.tool_calls else 0
+        elapsed = time.time() - start_time
+
+        if tool_calls > 0:
+            print(f"[Agent Node] ✓ Generated {tool_calls} tool call(s)")
+            for i, tool_call in enumerate(response.tool_calls, 1):
+                print(f"  {i}. {tool_call.get('name', 'unknown')} - {tool_call.get('args', {})}")
+        else:
+            print(f"[Agent Node] ✓ Generated response ({response_length} chars)")
+
+        print(f"  Processing time: {elapsed:.3f}s")
 
         return {"messages": [response]}
 
@@ -956,6 +994,8 @@ Example response:
         Returns:
             The accumulated AIMessage response
         """
+        stream_start = time.time()
+
         # Emit start event
         start_event = LLMResponseStartEvent()
         self._emit_streaming_event(start_event)
@@ -964,6 +1004,7 @@ Example response:
         accumulated_content = ""
         invoke_result = None  # Result from invoke fallback (not streaming chunks)
         chunk_count = 0
+        used_fallback = False
 
         try:
             # Stream from the LLM
@@ -985,6 +1026,7 @@ Example response:
         # If streaming produced no content (empty response), fall back to invoke
         # This happens when tool calls are being made instead of text response
         if not accumulated_content:
+            used_fallback = True
             invoke_result = llm_with_tools.invoke(messages)
 
             # Extract content from the response
@@ -996,6 +1038,15 @@ Example response:
         # Emit completion event
         completion_event = LLMResponseChunkEvent(content="", is_complete=True)
         self._emit_streaming_event(completion_event)
+
+        stream_elapsed = time.time() - stream_start
+
+        # Log streaming details
+        if used_fallback:
+            print(f"[Streaming] {chunk_count} chunks received, no content → Using invoke() fallback")
+        else:
+            print(f"[Streaming] {chunk_count} chunks received, {len(accumulated_content)} chars accumulated")
+        print(f"[Streaming] Time: {stream_elapsed:.3f}s")
 
         # If we got a result from invoke fallback, return it (preserves tool_calls)
         if invoke_result and isinstance(invoke_result, AIMessage):
@@ -1030,6 +1081,7 @@ Example response:
         Execute tool calls with access to state (for dynamic lambda_mult).
         Uses Qwen3 cross-encoder for reranking if enabled.
         """
+        start_time = time.time()
         messages = state["messages"]
         last_message = messages[-1]
 
@@ -1047,6 +1099,9 @@ Example response:
             if tool_name == "knowledge_base":
                 query = tool_args.get("query", "")
 
+                print(f"\n[Retrieval] Query: '{query}'")
+                print(f"[Retrieval] Search strategy: Lambda={lambda_mult:.2f}")
+
                 # Create retriever with dynamic lambda_mult
                 retriever = self.vector_store.as_retriever(
                     search_type="hybrid",
@@ -1058,7 +1113,11 @@ Example response:
                 )
 
                 # Get initial results
+                retrieve_start = time.time()
                 results = retriever.invoke(query)
+                retrieve_elapsed = time.time() - retrieve_start
+
+                print(f"[Retrieval] ✓ Retrieved {len(results)} documents in {retrieve_elapsed:.3f}s")
 
                 # Apply reranking if enabled
                 if ENABLE_RERANKING and self.reranker and results:
@@ -1067,8 +1126,10 @@ Example response:
                     for i, doc in enumerate(results, 1):
                         doc.metadata['original_rank'] = i
 
-                    print(f"\n[Reranker] Processing {len(results)} candidates...")
+                    rerank_start = time.time()
+                    print(f"\n[Reranker] Processing {len(results)} candidates with Qwen3-Reranker-8B...")
                     reranked_results = self.reranker.rerank(query, results, RERANKER_TOP_K)
+                    rerank_elapsed = time.time() - rerank_start
 
                     # Extract documents with scores and store in metadata
                     results_with_scores = [(doc, score) for doc, score in reranked_results]
@@ -1079,7 +1140,8 @@ Example response:
                         doc.metadata['reranker_score'] = score
 
                     # Log reranking results with scores
-                    print(f"[Reranker] Reranking complete → top {len(results)} selected:")
+                    avg_score = sum(score for _, score in results_with_scores) / len(results_with_scores) if results_with_scores else 0
+                    print(f"[Reranker] ✓ Reranking complete in {rerank_elapsed:.3f}s → top {len(results)} selected (avg score: {avg_score:.4f})")
                     for i, (doc, score) in enumerate(results_with_scores, 1):
                         source = doc.metadata.get('source', 'unknown')
                         relevance_bar = "█" * int(score * 20)
@@ -1088,9 +1150,11 @@ Example response:
                     # Log order changes if applicable
                     reranked_sources = [doc.metadata.get('source', 'unknown') for doc in results]
                     if original_sources[:len(reranked_sources)] != reranked_sources:
-                        print(f"[Reranker] Order changed: {original_sources[:len(reranked_sources)]} → {reranked_sources}")
+                        print(f"[Reranker] ℹ Order changed (reranking improved relevance)")
                     else:
-                        print(f"[Reranker] Order unchanged (already optimally ranked)")
+                        print(f"[Reranker] ℹ Order unchanged (already optimally ranked)")
+                else:
+                    print(f"[Retrieval] No reranking (disabled or no documents)")
 
                 content = "\n\n".join([doc.page_content for doc in results]) if results else "No relevant information found."
 
@@ -1191,14 +1255,16 @@ Example response:
         retry_count = state.get("response_retry_count", 0)
         reasoning = response_grade.get("reasoning", "Response was incomplete or unclear")
 
+        # Create feedback message content for both agent and observability
+        feedback_content = f"[Response needs improvement] {reasoning}. Please provide a complete, well-structured response."
+
         # Create feedback message for the agent
-        feedback_msg = HumanMessage(
-            content=f"[Response needs improvement] {reasoning}. Please provide a complete, well-structured response."
-        )
+        feedback_msg = HumanMessage(content=feedback_content)
 
         return {
             "messages": [feedback_msg],
-            "response_retry_count": retry_count + 1
+            "response_retry_count": retry_count + 1,
+            "feedback": feedback_content  # Expose feedback for observability events
         }
 
     # ========================================================================
@@ -1214,6 +1280,7 @@ Example response:
         if not ENABLE_REFLECTION or not ENABLE_DOCUMENT_GRADING:
             return {}
 
+        start_time = time.time()
         retrieved_docs = state.get("retrieved_documents", [])
 
         if not retrieved_docs:
@@ -1225,6 +1292,8 @@ Example response:
                     "reasoning": "No documents retrieved"
                 }
             }
+
+        print(f"\n[Document Grader] Grading {len(retrieved_docs)} documents...")
 
         # Extract the original query from messages
         messages = state["messages"]
@@ -1239,9 +1308,13 @@ Example response:
 
         # Grade each document
         grades = []
-        for doc in retrieved_docs:
+        for i, doc in enumerate(retrieved_docs, 1):
             grade = self._grade_document(original_query, doc)
             grades.append(grade)
+            # Show individual grading results
+            status_icon = "✓" if grade["relevant"] else "✗"
+            source = grade.get("source", "unknown")
+            print(f"  {i}. {status_icon} [{source}] score={grade['score']:.2f} - {grade['reasoning']}")
 
         # Compute summary
         relevant_count = sum(1 for g in grades if g["relevant"])
@@ -1256,9 +1329,12 @@ Example response:
             "reasoning": f"{relevant_count}/{len(grades)} documents relevant (avg score: {avg_score:.2f})"
         }
 
+        elapsed = time.time() - start_time
+
         if REFLECTION_SHOW_STATUS:
             status_icon = "✓" if passed else "✗"
-            print(f"[Document Grader] {status_icon} {summary['reasoning']}")
+            print(f"\n[Document Grader] {status_icon} {summary['reasoning']}")
+            print(f"  Grading time: {elapsed:.3f}s")
 
         return {
             "document_grades": grades,
@@ -1373,8 +1449,11 @@ Respond with ONLY the rewritten query, nothing else."""
         if not ENABLE_REFLECTION or not ENABLE_RESPONSE_GRADING:
             return {}
 
+        start_time = time.time()
         messages = state["messages"]
         original_query = state.get("original_query", "")
+
+        print(f"\n[Response Grader] Evaluating response quality...")
 
         # Get the last AI response (non-tool-call)
         last_response = None
@@ -1396,16 +1475,24 @@ Respond with ONLY the rewritten query, nothing else."""
         # Get document context
         doc_summary = state.get("document_grade_summary", {})
 
+        # Show response preview and context
+        response_preview = last_response[:150].replace("\n", " ") + "..." if len(last_response) > 150 else last_response
+        print(f"  Response: {response_preview}")
+        print(f"  Response length: {len(last_response)} chars")
+
         grade = self._grade_response(
             query=original_query,
             response=last_response,
             doc_context=doc_summary
         )
 
+        elapsed = time.time() - start_time
+
         if REFLECTION_SHOW_STATUS:
             status_icon = "✓" if grade["grade"] == "pass" else "✗"
-            print(f"[Response Grader] {status_icon} {grade['grade'].upper()} (score: {grade['score']:.2f})")
-            print(f"  {grade['reasoning']}")
+            print(f"\n[Response Grader] {status_icon} {grade['grade'].upper()} (score: {grade['score']:.2f})")
+            print(f"  Reasoning: {grade['reasoning']}")
+            print(f"  Grading time: {elapsed:.3f}s")
 
         return {"response_grade": grade}
 
