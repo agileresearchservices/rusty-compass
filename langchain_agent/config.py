@@ -274,13 +274,13 @@ ENABLE_RESPONSE_GRADING = True      # Evaluate final response quality
 ENABLE_QUERY_TRANSFORMATION = True  # Rewrite query if documents are poor
 
 # Maximum number of retrieval iterations (1 = no retries, 2 = one retry)
-REFLECTION_MAX_ITERATIONS = 2
+REFLECTION_MAX_ITERATIONS = 1
 
 # Minimum number of relevant documents required to pass grading
-REFLECTION_MIN_RELEVANT_DOCS = 2
+REFLECTION_MIN_RELEVANT_DOCS = 1
 
 # Minimum score threshold for document relevance (0.0-1.0)
-REFLECTION_DOC_SCORE_THRESHOLD = 0.5
+REFLECTION_DOC_SCORE_THRESHOLD = 0.3
 
 # Minimum score threshold for response quality (0.0-1.0)
 REFLECTION_RESPONSE_SCORE_THRESHOLD = 0.6
@@ -291,7 +291,7 @@ REFLECTION_SHOW_STATUS = True
 # Batch size for document grading (process this many documents per LLM call)
 # If more documents than this, they will be processed in batches
 # Set to 1 to disable batch grading and grade documents individually
-DOCUMENT_GRADING_BATCH_SIZE = 5
+DOCUMENT_GRADING_BATCH_SIZE = 8
 
 # Skip document grading (skip LLM calls) if average reranker confidence exceeds this threshold
 # High reranker scores (>0.95) from Qwen3-Reranker already indicate relevance
