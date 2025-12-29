@@ -79,9 +79,13 @@ run:
 
 stop:
 	@echo "Stopping all services..."
-	@echo "  Stopping Python processes..."
-	pkill -f "python.*main.py" || true
-	pkill -f "uvicorn" || true
+	@echo "  Stopping Python processes (graceful)..."
+	pkill -15 -f "python.*main.py" || true
+	pkill -15 -f "uvicorn" || true
+	@sleep 2
+	@echo "  Force stopping any remaining processes..."
+	pkill -9 -f "python.*main.py" || true
+	pkill -9 -f "uvicorn" || true
 	@echo "  Stopping npm/Node processes..."
 	pkill -f "npm.*dev" || true
 	pkill -f "vite" || true

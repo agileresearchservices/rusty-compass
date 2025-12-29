@@ -159,8 +159,13 @@ class Qwen3Reranker:
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
         self.tokenizer.padding_side = "left"
 
-        # Load as causal language model (not embedding model)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, dtype=torch.float32).eval()
+        # Load as causal language model (not embedding model) in float16 to reduce memory (32GB → 16GB)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            torch_dtype=torch.float16,  # Use float16 instead of float32 (50% memory reduction)
+            device_map="auto"  # Automatically use GPU if available
+        ).eval()
 
         # Move to GPU if available
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
