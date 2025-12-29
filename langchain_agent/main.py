@@ -163,8 +163,7 @@ class Qwen3Reranker:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             trust_remote_code=True,
-            torch_dtype=torch.float16,  # Use float16 instead of float32 (50% memory reduction)
-            device_map="auto"  # Automatically use GPU if available
+            dtype=torch.float16  # Use float16 instead of float32 (50% memory reduction)
         ).eval()
 
         # Move to GPU if available
