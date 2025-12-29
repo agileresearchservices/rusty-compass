@@ -4,10 +4,46 @@ A detailed guide for setting up the LangChain Agent from scratch.
 
 ## Architecture Overview
 
+```mermaid
+flowchart TB
+    subgraph Prerequisites["Prerequisites"]
+        DOCKER["Docker"]
+        PYTHON["Python 3.10+"]
+        OLLAMA["Ollama"]
+    end
+
+    subgraph Services["Running Services"]
+        PG["PostgreSQL 16<br/>+ PGVector"]
+        OL["Ollama Server<br/>localhost:11434"]
+    end
+
+    subgraph Models["Models (Ollama)"]
+        LLM["gpt-oss:20b<br/>(Reasoning)"]
+        EMB["nomic-embed-text<br/>(Embeddings)"]
+    end
+
+    subgraph HFModels["Models (HuggingFace)"]
+        RERANK["BGE-Reranker-v2-m3<br/>(Cross-encoder)"]
+    end
+
+    subgraph App["Application"]
+        AGENT["LangGraph Agent<br/>(main.py)"]
+        API["FastAPI Server<br/>(optional)"]
+    end
+
+    DOCKER --> PG
+    OLLAMA --> OL
+    OL --> LLM & EMB
+    PYTHON --> AGENT & API
+    PG --> AGENT
+    LLM & EMB --> AGENT
+    RERANK --> AGENT
+```
+
 The system is built on three core components:
 
 1. **PostgreSQL + PGVector** - Vector database for semantic search
-2. **Ollama** - Local LLM runtime (LLM, embeddings, reranker)
+2. **Ollama** - Local LLM runtime (LLM, embeddings)
 3. **LangGraph** - Agent orchestration with memory management
 
 ## Prerequisites
@@ -54,6 +90,33 @@ Run the unified setup script:
 
 ```bash
 python setup.py
+```
+
+### Setup Flow
+
+```mermaid
+flowchart LR
+    subgraph Step1["Step 1-2"]
+        DB["Create Database"]
+        PGV["Enable PGVector"]
+    end
+
+    subgraph Step3["Step 3-4"]
+        TABLES["Create Tables"]
+        IDX["Create Indexes<br/>(IVFFlat + GIN)"]
+    end
+
+    subgraph Step5["Step 5"]
+        PULL["Pull Ollama Models<br/>gpt-oss:20b<br/>nomic-embed-text"]
+    end
+
+    subgraph Step6["Step 6-7"]
+        LOAD["Load Documents"]
+        EMBED["Generate Embeddings"]
+        VERIFY["Verify Setup"]
+    end
+
+    Step1 --> Step3 --> Step5 --> Step6
 ```
 
 This handles all initialization in 7 steps:

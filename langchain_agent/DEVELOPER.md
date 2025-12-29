@@ -6,79 +6,108 @@ Information for developers extending or modifying the LangChain Agent.
 
 ### Core Components
 
-```
-main.py
-├── BGEReranker (Lines 94-230)
-│   ├── __init__: Load cross-encoder model from HuggingFace
-│   ├── _format_input: Format query-document pairs
-│   ├── score_documents: Score relevance of documents
-│   └── rerank: Score and return top-k documents
-│
-├── State Types (Lines 244-280)
-│   ├── DocumentGrade: Grade for a single document
-│   ├── ReflectionResult: Result of grading operation
-│   └── CustomAgentState: Extended state with reflection fields
-│
-├── SimplePostgresVectorStore (Lines 283-...)
-│   ├── similarity_search: Vector similarity search
-│   ├── hybrid_search: Vector + full-text (RRF fusion)
-│   └── as_retriever: LangChain retriever interface
-│
-└── LangChainAgent (Lines 633-...)
-    ├── __init__: Initialize components
-    ├── verify_prerequisites: Check all services running
-    ├── initialize_components: Load LLM, embeddings, reranker
-    │
-    ├── Core Agent Nodes:
-    │   ├── query_evaluator_node: Classify query → lambda_mult
-    │   ├── agent_node: LLM reasoning with tool binding
-    │   ├── tools_node: Execute retrieval with reranking
-    │   └── should_continue: Route to tools or response_grader
-    │
-    ├── Reflection Nodes:
-    │   ├── document_grader_node: Grade document relevance
-    │   ├── query_transformer_node: Rewrite query on failure
-    │   ├── response_grader_node: Evaluate response quality
-    │   ├── route_after_doc_grading: Route to agent or retry
-    │   ├── _grade_document: LLM prompt for document grading
-    │   └── _grade_response: LLM prompt for response grading
-    │
-    ├── create_agent_graph: Build LangGraph with reflection loop
-    ├── cleanup: Resource cleanup
-    └── run: Interactive loop
+```mermaid
+classDiagram
+    class BGEReranker {
+        +tokenizer: AutoTokenizer
+        +model: AutoModelForSequenceClassification
+        +device: str
+        +__init__(model_name)
+        +score_documents(query, documents) List~float~
+        +rerank(query, documents, top_k) List~Document~
+    }
+
+    class SimplePostgresVectorStore {
+        +embeddings: OllamaEmbeddings
+        +collection_name: str
+        +similarity_search(query, k) List~Document~
+        +hybrid_search(query, k, lambda_mult) List~Document~
+        +as_retriever() Retriever
+    }
+
+    class LangChainAgent {
+        +llm: ChatOllama
+        +embeddings: OllamaEmbeddings
+        +reranker: BGEReranker
+        +vector_store: SimplePostgresVectorStore
+        +checkpointer: PostgresSaver
+        +query_evaluator_node(state)
+        +agent_node(state)
+        +tools_node(state)
+        +document_grader_node(state)
+        +query_transformer_node(state)
+        +response_grader_node(state)
+        +create_agent_graph() CompiledGraph
+        +run()
+    }
+
+    class CustomAgentState {
+        +messages: List~BaseMessage~
+        +lambda_mult: float
+        +iteration_count: int
+        +document_grades: List~DocumentGrade~
+        +original_query: str
+        +transformed_query: Optional~str~
+    }
+
+    LangChainAgent --> BGEReranker
+    LangChainAgent --> SimplePostgresVectorStore
+    LangChainAgent --> CustomAgentState
 ```
 
 ### Data Flow
 
-```
-User Query
-    ↓
-[Query Evaluator] Classify query type → dynamic lambda_mult
-    ↓
-[LangChain Agent] ReAct agent reasoning
-    ↓
-Tool Call: knowledge_base(query)
-    ↓
-[Hybrid Search] RRF fusion of:
-    - Vector search (768-dim embeddings)
-    - Full-text search (GIN index)
-    Result: 15 candidates
-    ↓
-[BGE Reranker] Score candidates with cross-encoder
-    Result: 4 highest-scoring documents
-    ↓
-[Document Grader] Evaluate each document's relevance
-    ├── PASS (≥2 relevant docs) → Continue to LLM
-    └── FAIL (<2 relevant docs) → Query Transformer → Retry (max 2)
-    ↓
-[LLM] Generate response from graded documents
-    ↓
-[Response Grader] Evaluate response quality
-    - Relevance, completeness, clarity
-    ↓
-[Conversation Memory] Save to PostgreSQL
-    ↓
-[Streaming Output] Character-by-character to user
+```mermaid
+flowchart TD
+    subgraph Input
+        Q["User Query"]
+    end
+
+    subgraph QueryEval["Query Evaluation"]
+        QE["Classify Query Type"]
+        LAMBDA["Set lambda_mult<br/>(0.2 - 0.9)"]
+    end
+
+    subgraph Agent["ReAct Agent"]
+        REASON["LLM Reasoning"]
+        TOOL["Tool Call: knowledge_base"]
+    end
+
+    subgraph Search["Hybrid Search"]
+        VS["Vector Search<br/>(768-dim, IVFFlat)"]
+        TS["Full-Text Search<br/>(GIN index)"]
+        RRF["RRF Fusion<br/>(15 candidates)"]
+        RERANK["BGE Reranker<br/>(→ top 4)"]
+    end
+
+    subgraph Reflection["Reflection Loop"]
+        DG["Document Grader"]
+        QT["Query Transformer"]
+        RG["Response Grader"]
+    end
+
+    subgraph Output
+        GEN["Generate Response"]
+        MEM["Save to PostgreSQL"]
+        STREAM["Stream to User"]
+    end
+
+    Q --> QE
+    QE --> LAMBDA
+    LAMBDA --> REASON
+    REASON --> TOOL
+    TOOL --> VS & TS
+    VS --> RRF
+    TS --> RRF
+    RRF --> RERANK
+    RERANK --> DG
+    DG -->|pass| GEN
+    DG -->|fail| QT
+    QT -->|retry| QE
+    GEN --> RG
+    RG -->|pass| MEM
+    RG -->|fail| REASON
+    MEM --> STREAM
 ```
 
 ## Key Files
@@ -241,12 +270,24 @@ def evaluate_query(query: str, llm) -> float:
 **Purpose**: Self-improving agent that grades documents and responses
 
 **Graph Flow**:
-```
-query_evaluator → agent → tools → document_grader
-                                       ↓
-                              (pass) → agent → response_grader → END
-                                       ↓
-                              (fail & retry) → query_transformer → query_evaluator
+
+```mermaid
+flowchart LR
+    QE["query_evaluator"] --> A["agent"]
+    A --> T["tools"]
+    T --> DG["document_grader"]
+    DG -->|pass| A2["agent"]
+    DG -->|"fail & retry"| QT["query_transformer"]
+    QT --> QE
+    A2 --> RG["response_grader"]
+    RG -->|pass| END["END"]
+    RG -->|fail| RI["response_improver"]
+    RI --> A
+
+    style DG fill:#e8f5e9
+    style RG fill:#e8f5e9
+    style QT fill:#fff8e1
+    style RI fill:#fff8e1
 ```
 
 **Components**:
