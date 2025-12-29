@@ -154,7 +154,7 @@ function StepDetails({ step }: { step: ObservabilityStep }) {
       return <ResponseGraderDetails />
 
     case 'agent':
-      return <LLMAgentDetails />
+      return <LLMAgentDetails step={step} />
 
     case 'query_transformer':
       return <QueryTransformerDetails />

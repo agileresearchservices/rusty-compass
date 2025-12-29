@@ -220,7 +220,7 @@ export function SearchDetails() {
       <div className="text-xs text-gray-500 border-t border-gray-700 pt-3">
         <p>
           <strong>Hybrid search</strong> combines BM25 (keyword) and vector similarity.
-          The <strong>reranker</strong> (Qwen3) then scores each document for
+          The <strong>reranker</strong> (BGE) then scores each document for
           relevance using a cross-encoder model.
         </p>
       </div>

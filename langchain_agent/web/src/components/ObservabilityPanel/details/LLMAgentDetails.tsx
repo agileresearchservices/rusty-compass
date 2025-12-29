@@ -2,20 +2,20 @@
  * LLMAgentDetails - Display LLM agent execution details including reasoning, tool calls, and responses
  */
 
-import { useObservabilityStore } from '../../../stores/observabilityStore'
 import type {
   LLMReasoningChunkEvent,
   LLMResponseChunkEvent,
   ToolCallEvent,
+  ObservabilityStep,
 } from '../../../types/events'
 
-export function LLMAgentDetails() {
-  const { steps, currentNode } = useObservabilityStore()
+interface LLMAgentDetailsProps {
+  step: ObservabilityStep
+}
 
-  // Find the current agent step
-  const agentStep = steps.find(
-    (step) => step.node === 'agent' && (currentNode === 'agent' || step.status === 'complete')
-  )
+export function LLMAgentDetails({ step }: LLMAgentDetailsProps) {
+  // Use the step passed directly from the parent, not from global state
+  const agentStep = step
 
   if (!agentStep) {
     return (
