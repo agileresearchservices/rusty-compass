@@ -1610,6 +1610,7 @@ Respond with ONLY the rewritten query, nothing else."""
         previous_score = state.get("document_grade_summary", {}).get("score", 0.0)
 
         return {
+            "original_query": original_query,  # Include for observability
             "transformed_query": transformed,
             "iteration_count": new_iteration,
             "messages": [retry_message],
