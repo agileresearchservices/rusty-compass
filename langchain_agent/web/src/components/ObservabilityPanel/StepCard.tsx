@@ -12,7 +12,6 @@ import { ResponseGraderDetails } from './details/ResponseGraderDetails'
 import { LLMAgentDetails } from './details/LLMAgentDetails'
 import { QueryTransformerDetails } from './details/QueryTransformerDetails'
 import { ResponseImproverDetails } from './details/ResponseImproverDetails'
-import { EventCard } from './EventCard'
 import clsx from 'clsx'
 
 interface StepCardProps {
@@ -157,10 +156,10 @@ function StepDetails({ step }: { step: ObservabilityStep }) {
       return <LLMAgentDetails step={step} />
 
     case 'query_transformer':
-      return <QueryTransformerDetails />
+      return <QueryTransformerDetails step={step} />
 
     case 'response_improver':
-      return <ResponseImproverDetails />
+      return <ResponseImproverDetails step={step} />
 
     default:
       return (

@@ -5,18 +5,19 @@
 import { useObservabilityStore } from '../../../stores/observabilityStore'
 import { RefreshCw, AlertCircle } from 'lucide-react'
 import clsx from 'clsx'
-import type { ResponseImprovementEvent, ResponseGradingEvent } from '../../../types/events'
+import type { ObservabilityStep, ResponseImprovementEvent, ResponseGradingEvent } from '../../../types/events'
 
-export function ResponseImproverDetails() {
+interface ResponseImproverDetailsProps {
+  step: ObservabilityStep
+}
+
+export function ResponseImproverDetails({ step }: ResponseImproverDetailsProps) {
   const { steps } = useObservabilityStore()
 
-  // Find the response_improver step
-  const improverStep = steps.find((s) => s.node === 'response_improver')
-
-  // Find all response_improvement events in the improver step
-  const improvementEvents = improverStep?.events.filter(
+  // Find all response_improvement events in this specific step (not global state)
+  const improvementEvents = step.events.filter(
     (e) => e.type === 'response_improvement'
-  ) as ResponseImprovementEvent[] | undefined
+  ) as ResponseImprovementEvent[]
 
   // Find the most recent response_grading event to get the previous score/reasoning
   // Look through all steps in reverse order to find the last response_grading event
@@ -31,7 +32,7 @@ export function ResponseImproverDetails() {
     }
   }
 
-  if (!improvementEvents || improvementEvents.length === 0) {
+  if (improvementEvents.length === 0) {
     return (
       <div className="text-sm text-gray-500">
         Waiting for response improvement...

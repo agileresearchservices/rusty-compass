@@ -2,15 +2,15 @@
  * QueryTransformerDetails - Shows query transformation events and iterations.
  */
 
-import { useObservabilityStore } from '../../../stores/observabilityStore'
-import { QueryTransformationEvent } from '../../../types/events'
+import type { ObservabilityStep, QueryTransformationEvent } from '../../../types/events'
 
-export function QueryTransformerDetails() {
-  const { steps } = useObservabilityStore()
+interface QueryTransformerDetailsProps {
+  step: ObservabilityStep
+}
 
-  // Extract query transformation events from the query_transformer step
-  const transformerStep = steps.find((s) => s.node === 'query_transformer')
-  const transformationEvents = (transformerStep?.events || []).filter(
+export function QueryTransformerDetails({ step }: QueryTransformerDetailsProps) {
+  // Extract query transformation events from this specific step (not global state)
+  const transformationEvents = step.events.filter(
     (e): e is QueryTransformationEvent => e.type === 'query_transformation'
   )
 
