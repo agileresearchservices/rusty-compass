@@ -1463,8 +1463,20 @@ Reasoning: {query_analysis}"""
         relevant_count = sum(1 for g in grades if g["relevant"])
         avg_score = sum(g["score"] for g in grades) / len(grades) if grades else 0.0
 
+        # TIER 2 OPTIMIZATION: Adaptive thresholds - relax on retries (diminishing returns)
+        iteration = state.get("iteration_count", 0)
+
+        if iteration == 0:
+            # Initial attempt: use configured thresholds
+            min_docs_required = REFLECTION_MIN_RELEVANT_DOCS  # 1
+            min_score_required = REFLECTION_DOC_SCORE_THRESHOLD  # 0.3
+        else:
+            # Retry attempt: be more lenient (transformation rarely helps)
+            min_docs_required = max(1, REFLECTION_MIN_RELEVANT_DOCS - 1)  # Still 1
+            min_score_required = max(0.25, REFLECTION_DOC_SCORE_THRESHOLD - 0.15)  # 0.15
+
         # Pass if we have enough relevant documents
-        passed = relevant_count >= REFLECTION_MIN_RELEVANT_DOCS and avg_score >= REFLECTION_DOC_SCORE_THRESHOLD
+        passed = relevant_count >= min_docs_required and avg_score >= min_score_required
 
         summary = {
             "grade": "pass" if passed else "fail",
@@ -1478,6 +1490,11 @@ Reasoning: {query_analysis}"""
             status_icon = "✓" if passed else "✗"
             print(f"\n[Document Grader] {status_icon} {summary['reasoning']}")
             print(f"  Grading time: {elapsed:.3f}s")
+
+            # Show iteration progress
+            iteration = state.get("iteration_count", 0)
+            max_iterations = REFLECTION_MAX_ITERATIONS
+            print(f"  Iteration: {iteration + 1} / {max_iterations + 1} max attempts")
 
         return {
             "document_grades": grades,
@@ -1726,7 +1743,7 @@ Use these guidelines:
         doc_sections = []
         for i, doc in enumerate(documents, 1):
             source = doc.metadata.get("source", "unknown")
-            content_preview = doc.page_content[:300]  # Shorter preview for batch
+            content_preview = doc.page_content[:500]  # Match sequential grading context
             doc_sections.append(f"DOCUMENT {i} (from {source}):\n{content_preview}")
 
         docs_text = "\n\n".join(doc_sections)
