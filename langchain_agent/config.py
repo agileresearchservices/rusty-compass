@@ -35,7 +35,6 @@ __all__ = [
     "RERANKER_MODEL",
     "RERANKER_FETCH_K",
     "RERANKER_TOP_K",
-    "RERANKER_INSTRUCTION",
     # Agent configuration
     "RETRIEVER_TOOL_NAME",
     "RETRIEVER_TOOL_DESCRIPTION",
@@ -170,21 +169,16 @@ ENABLE_RERANKING = True
 
 # Cross-encoder reranker model from HuggingFace
 # Options:
-#   - "BAAI/bge-reranker-v2-m3" (recommended, fast and accurate)
-#   - "BAAI/bge-reranker-v2-large" (more accurate but slower)
-#   - "Qwen/Qwen3-Reranker-8B" (multilingual, state-of-the-art)
-#   - "Qwen/Qwen3-Reranker-4B" (faster, smaller)
-RERANKER_MODEL = "Qwen/Qwen3-Reranker-8B"
+#   - "BAAI/bge-reranker-v2-m3" (default, multilingual, ~2.3GB, fast)
+#   - "BAAI/bge-reranker-v2-large" (more accurate, ~1.2GB)
+#   - "BAAI/bge-reranker-base" (smaller, faster, ~440MB)
+RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
 # Number of candidates to fetch before reranking
 RERANKER_FETCH_K = 15
 
 # Final number of documents to return after reranking
 RERANKER_TOP_K = 4
-
-# Custom instruction for reranker (domain-specific, affects 1-5% performance)
-# If None, uses default instruction
-RERANKER_INSTRUCTION = None
 
 # ============================================================================
 # QUERY EVALUATOR CONFIGURATION

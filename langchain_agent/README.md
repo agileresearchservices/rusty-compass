@@ -25,7 +25,7 @@ ollama list
 Expected models:
 - `gpt-oss:20b` - Main LLM for reasoning
 - `nomic-embed-text:latest` - Embedding model for retrieval
-- `Qwen/Qwen3-Reranker-8B` - Cross-encoder reranker for result relevance (loaded via HuggingFace transformers, not Ollama)
+- `BAAI/bge-reranker-v2-m3` - Cross-encoder reranker for result relevance (loaded via HuggingFace transformers, not Ollama)
 
 ### 2. PostgreSQL Running
 Start the Docker container from the parent directory:
@@ -49,18 +49,17 @@ Credentials:
 The agent includes a cross-encoder reranker to improve search result quality. The model is downloaded automatically on first run from HuggingFace:
 
 ```bash
-# The Qwen3-Reranker-8B model (~16GB) will be downloaded automatically
-# On first run, this may take 2-5 minutes depending on your internet speed
+# The bge-reranker-v2-m3 model (~2.3GB) will be downloaded automatically
+# On first run, this may take 1-2 minutes depending on your internet speed
 # The model is cached in ~/.cache/huggingface/
 
 # (Optional) Pre-download the model to avoid delay on first run:
-python -c "from transformers import AutoTokenizer, AutoModel; AutoTokenizer.from_pretrained('Qwen/Qwen3-Reranker-8B', trust_remote_code=True); AutoModel.from_pretrained('Qwen/Qwen3-Reranker-8B', trust_remote_code=True)"
+python -c "from transformers import AutoTokenizer, AutoModel; AutoTokenizer.from_pretrained('BAAI/bge-reranker-v2-m3', trust_remote_code=True); AutoModel.from_pretrained('BAAI/bge-reranker-v2-m3', trust_remote_code=True)"
 ```
 
 Alternative reranker models available in `config.py`:
-- `BAAI/bge-reranker-v2-m3` - Fast and accurate (recommended for resource-constrained environments)
+- `BAAI/bge-reranker-v2-m3` - Fast and accurate (default, recommended)
 - `BAAI/bge-reranker-v2-large` - More accurate but slower
-- `Qwen/Qwen3-Reranker-4B` - Smaller model, faster inference
 
 See the Configuration section below for details on selecting a different reranker.
 
@@ -153,7 +152,7 @@ LANGCHAIN AGENT - COMPLETE SETUP
 [5/7] Setting up Ollama models...
       ✓ gpt-oss:20b pulled successfully
       ✓ nomic-embed-text:latest pulled successfully
-      ✓ Qwen/Qwen3-Reranker-8B pulled successfully
+      ✓ BAAI/bge-reranker-v2-m3 pulled successfully
 [6/7] Loading sample documents...
       ✓ Loaded: python_basics.txt
       ✓ Documents: 3
@@ -315,7 +314,7 @@ Try these to test the agent's knowledge retrieval:
    - Vector search: Semantic similarity based on embeddings
    - Lexical search: Full-text keyword matching
    - RRF Fusion: Reciprocal rank fusion combines both results (~15 candidates)
-5. **Cross-Encoder Reranking** → Qwen3-Reranker scores candidates by relevance (→ top 4)
+5. **Cross-Encoder Reranking** → BGE-Reranker scores candidates by relevance (→ top 4)
 6. **Document Grading** → LLM evaluates each document's relevance to the query
    - If documents fail grading, query is transformed and retrieval retries (max 2 iterations)
 7. **Response Generation** → LLM generates response based on graded documents
@@ -384,14 +383,12 @@ Edit `config.py` to customize:
 The agent uses a cross-encoder model to rerank hybrid search results for improved relevance before sending to the LLM.
 
 - **ENABLE_RERANKING**: Enable cross-encoder reranking (default: `True`)
-- **RERANKER_MODEL**: Cross-encoder model to use (default: `"Qwen/Qwen3-Reranker-8B"`)
+- **RERANKER_MODEL**: Cross-encoder model to use (default: `"BAAI/bge-reranker-v2-m3"`)
   - Alternatives:
-    - `"BAAI/bge-reranker-v2-m3"` - Fast, compact (440MB), good for limited resources
+    - `"BAAI/bge-reranker-v2-m3"` - Fast, compact (~2.3GB), recommended (default)
     - `"BAAI/bge-reranker-v2-large"` - Better accuracy, larger model (~1.2GB)
-    - `"Qwen/Qwen3-Reranker-4B"` - Smaller Qwen model (~8GB), faster than 8B variant
 - **RERANKER_FETCH_K**: Number of candidates to fetch before reranking (default: 15)
 - **RERANKER_TOP_K**: Final number of documents after reranking (default: 4)
-- **RERANKER_INSTRUCTION**: Optional domain-specific instruction for the reranker (default: `None`)
 
 **How It Works:**
 1. Hybrid search retrieves 15 candidate documents using combined vector + lexical search
@@ -549,27 +546,23 @@ ollama pull nomic-embed-text:latest
 ### Reranker Troubleshooting
 
 #### "Reranker model download is slow / timing out"
-The Qwen3-Reranker-8B model is ~16GB. On first run, it downloads from HuggingFace:
+The bge-reranker-v2-m3 model is ~2.3GB. On first run, it downloads from HuggingFace:
 ```bash
 # Monitor the download progress
 # Models are cached in ~/.cache/huggingface/
 
-# If download fails/times out, try switching to a smaller model in config.py:
-RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"  # Much smaller (~440MB)
+# If download fails/times out, check your internet connection and retry
 ```
 
 #### "CUDA out of memory / GPU memory exceeded"
-The reranker loads the model into GPU memory (8B parameters ≈ 16GB):
+The reranker loads the model into GPU memory:
 ```python
-# In config.py, switch to a smaller model or disable reranking:
+# In config.py, disable reranking if needed:
 
-# Option 1: Use smaller model
-RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"  # Only 440MB
-
-# Option 2: Use CPU-based reranking (slower but uses system RAM)
+# Option 1: Use CPU-based reranking (slower but uses system RAM)
 # Set in config.py and model will auto-detect CPU if CUDA fails
 
-# Option 3: Disable reranking entirely
+# Option 2: Disable reranking entirely
 ENABLE_RERANKING = False
 ```
 
@@ -586,9 +579,8 @@ ENABLE_RERANKING = False  # Disable to get back to ~600ms query time
 
 #### "Reranker scores are all the same / uniform"
 This can indicate the model output format differs from expected. Check:
-1. The model is downloaded correctly: `ls ~/.cache/huggingface/hub/ | grep Qwen`
-2. Try an alternative model: Switch to `BAAI/bge-reranker-v2-m3` in config.py
-3. Check transformers version: `pip list | grep transformers` (should be 4.40+)
+1. The model is downloaded correctly: `ls ~/.cache/huggingface/hub/ | grep bge`
+2. Check transformers version: `pip list | grep transformers` (should be 4.40+)
 
 #### "ImportError: cannot import AutoTokenizer"
 The transformers library is not installed:
@@ -687,7 +679,7 @@ python test_reranker.py
 Expected output:
 ```
 ======================================================================
-QWEN3-RERANKER-8B CROSS-ENCODER TESTS
+BGE-RERANKER-V2-M3 CROSS-ENCODER TESTS
 ======================================================================
 
 Test 1: Machine Learning Query
@@ -698,9 +690,9 @@ Test 1: Machine Learning Query
     3. [python_guide.txt] Python is a high-level programming language...
 
   AFTER (Reranked by Relevance Score):
-    1. score=0.9234 ⭐ [ml_guide.txt] Machine learning is a subset of artificial intelligence...
-    2. score=0.7891 ⭐ [neural_nets.txt] Neural networks are computational models...
-    3. score=0.6543 ⭐ [python_guide.txt] Python is a high-level programming language...
+    1. score=0.9234 [ml_guide.txt] Machine learning is a subset of artificial intelligence...
+    2. score=0.7891 [neural_nets.txt] Neural networks are computational models...
+    3. score=0.6543 [python_guide.txt] Python is a high-level programming language...
 
 [... 5 more tests ...]
 
@@ -709,7 +701,7 @@ TEST SUMMARY
 ======================================================================
 Passed: 6/6
 Failed: 0/6
-✓ All tests passed! Qwen3-Reranker is working correctly.
+✓ All tests passed! BGE-Reranker is working correctly.
 ```
 
 ### Test Hybrid Search
@@ -806,16 +798,13 @@ Switch between different cross-encoder models based on your needs:
 ```python
 # In config.py
 
-# Option 1: Fast and compact (Recommended for resource-constrained)
-RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"  # ~440MB, very fast
+# Option 1: Fast and compact (Default, recommended)
+RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"  # ~2.3GB, fast
 
-# Option 2: Balanced (Default, state-of-the-art multilingual)
-RERANKER_MODEL = "Qwen/Qwen3-Reranker-8B"  # ~16GB, very accurate
-
-# Option 3: Large (Maximum accuracy)
+# Option 2: Large (Maximum accuracy)
 RERANKER_MODEL = "BAAI/bge-reranker-v2-large"  # ~1.2GB, slower but more accurate
 
-# Option 4: Disable reranking (Fastest queries, no reranking)
+# Option 3: Disable reranking (Fastest queries, no reranking)
 ENABLE_RERANKING = False
 RERANKER_FETCH_K = 4  # Go back to standard retrieval
 ```
@@ -824,10 +813,8 @@ RERANKER_FETCH_K = 4  # Go back to standard retrieval
 
 | Model | Size | Speed | Accuracy | Languages | Recommendation |
 |-------|------|-------|----------|-----------|---|
-| BAAI/bge-reranker-v2-m3 | 440MB | Fast | Good | 100+ | Limited resources |
-| Qwen/Qwen3-Reranker-8B | 16GB | Slow | Excellent | 100+ | **Default** |
-| Qwen/Qwen3-Reranker-4B | 8GB | Medium | Very Good | 100+ | Balance speed/quality |
-| BAAI/bge-reranker-v2-large | 1.2GB | Medium | Very Good | 100+ | Better than m3 |
+| BAAI/bge-reranker-v2-m3 | 2.3GB | Fast | Good | 100+ | **Default** |
+| BAAI/bge-reranker-v2-large | 1.2GB | Medium | Very Good | 100+ | Higher accuracy |
 
 ### Customize Retrieval
 Modify the retriever settings in `main.py`:

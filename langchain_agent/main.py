@@ -41,7 +41,7 @@ from langchain_core.documents import Document
 from dataclasses import dataclass
 from typing import Generator
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 # ============================================================================
 # STREAMING EVENT DEFINITIONS
@@ -107,7 +107,6 @@ from config import (
     RERANKER_MODEL,
     RERANKER_FETCH_K,
     RERANKER_TOP_K,
-    RERANKER_INSTRUCTION,
     ENABLE_COMPACTION,
     MAX_CONTEXT_TOKENS,
     COMPACTION_THRESHOLD_PCT,
@@ -130,24 +129,24 @@ from config import (
 
 
 # ============================================================================
-# QWEN3 RERANKER IMPLEMENTATION (LangChain-Compatible)
+# BGE RERANKER IMPLEMENTATION (LangChain-Compatible)
 # ============================================================================
 
-class Qwen3Reranker:
+class BGEReranker:
     """
-    Cross-encoder reranker using Qwen3-Reranker-8B from HuggingFace.
+    Cross-encoder reranker using BAAI/bge-reranker-v2-m3 from HuggingFace.
 
-    Qwen3-Reranker is a causal language model that predicts "yes"/"no" tokens
-    to indicate relevance. Scores are computed from the probability of the "yes" token.
+    BGE Reranker is a sequence classification model that directly outputs
+    relevance scores for query-document pairs. Scores are normalized to [0, 1]
+    using sigmoid.
     """
 
-    def __init__(self, model_name: str = "Qwen/Qwen3-Reranker-8B", instruction: Optional[str] = None):
+    def __init__(self, model_name: str = "BAAI/bge-reranker-v2-m3"):
         """
-        Initialize the Qwen3 cross-encoder reranker model.
+        Initialize the BGE cross-encoder reranker model.
 
         Args:
-            model_name: HuggingFace model identifier (default: Qwen/Qwen3-Reranker-8B)
-            instruction: Custom domain instruction for reranking (optional)
+            model_name: HuggingFace model identifier (default: BAAI/bge-reranker-v2-m3)
 
         Raises:
             OSError: If model cannot be downloaded from HuggingFace
@@ -155,41 +154,24 @@ class Qwen3Reranker:
         """
         self.model_name = model_name
 
-        # Load tokenizer with left padding (important for causal LM)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-        self.tokenizer.padding_side = "left"
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-        # Load as causal language model (not embedding model) in float16 to reduce memory (32GB → 16GB)
-        self.model = AutoModelForCausalLM.from_pretrained(
+        # Load as sequence classification model in float16 for memory efficiency
+        self.model = AutoModelForSequenceClassification.from_pretrained(
             model_name,
-            trust_remote_code=True,
-            dtype=torch.float16  # Use float16 instead of float32 (50% memory reduction)
+            torch_dtype=torch.float16
         ).eval()
 
         # Move to GPU if available
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model = self.model.to(self.device)
 
-        # Get token IDs for "yes" and "no" for score computation
-        self.yes_token_id = self.tokenizer.convert_tokens_to_ids("yes")
-        self.no_token_id = self.tokenizer.convert_tokens_to_ids("no")
-
-        # Default instruction if not provided
-        self.instruction = instruction or "Given a web search query, retrieve relevant passages that answer the query"
-
-        logger.info(f"✓ Qwen3-Reranker loaded on device: {self.device}")
-        logger.info(f"  Yes token ID: {self.yes_token_id}, No token ID: {self.no_token_id}")
-
-    def _format_input(self, query: str, document: str) -> str:
-        """Format input according to Qwen3-Reranker specification"""
-        return f"<Instruct>: {self.instruction}\n<Query>: {query}\n<Document>: {document}"
+        logger.info(f"BGE-Reranker loaded on device: {self.device}")
 
     def score_documents(self, query: str, documents: List[Document], batch_size: int = 8) -> List[tuple[Document, float]]:
         """
-        Score documents by relevance to query using batch processing for speed.
-
-        OPTIMIZED: Processes multiple documents in single forward pass instead of one-by-one.
-        Expected speedup: 7-10x (105s → 10-15s for 15 documents).
+        Score documents by relevance to query using batch processing.
 
         Args:
             query: The search query string
@@ -197,8 +179,8 @@ class Qwen3Reranker:
             batch_size: Number of documents to process per batch (default: 8)
 
         Returns:
-            List of (Document, score) tuples sorted by score in descending order.
-            Scores are in range [0.0, 1.0] representing P(relevant)
+            List of (Document, score) tuples sorted by score descending.
+            Scores are in range [0.0, 1.0] after sigmoid normalization.
         """
         if not documents:
             return []
@@ -209,37 +191,28 @@ class Qwen3Reranker:
         for batch_idx in range(0, len(documents), batch_size):
             batch_docs = documents[batch_idx:batch_idx + batch_size]
 
-            # Format all documents in batch
-            formatted_inputs = [self._format_input(query, doc.page_content) for doc in batch_docs]
+            # Create query-document pairs for tokenization
+            pairs = [[query, doc.page_content] for doc in batch_docs]
 
             with torch.no_grad():
-                # Batch tokenization (all at once, not one-by-one)
+                # Tokenize all pairs in batch
                 inputs = self.tokenizer(
-                    formatted_inputs,
+                    pairs,
                     padding=True,
                     truncation=True,
                     return_tensors="pt",
-                    max_length=8192
+                    max_length=512
                 ).to(self.device)
 
-                # Single forward pass for entire batch (key optimization!)
-                outputs = self.model(**inputs)
+                # Forward pass - get logits
+                outputs = self.model(**inputs, return_dict=True)
+                logits = outputs.logits.view(-1).float()
 
-                # Extract logits from last token for all documents in batch
-                logits = outputs.logits[:, -1, :]  # [batch_size, vocab_size]
-
-                # Compute scores from yes/no token probabilities
-                batch_scores = torch.stack(
-                    [logits[:, self.no_token_id], logits[:, self.yes_token_id]],
-                    dim=1
-                )
-                batch_scores = torch.nn.functional.log_softmax(batch_scores, dim=1)
-
-                # Extract probability of "yes" for each document in batch
-                batch_probs = torch.exp(batch_scores[:, 1]).cpu().numpy()
+                # Apply sigmoid to normalize to [0, 1]
+                batch_scores = torch.sigmoid(logits).cpu().numpy()
 
                 # Pair each document with its score
-                for doc, score in zip(batch_docs, batch_probs):
+                for doc, score in zip(batch_docs, batch_scores):
                     scores.append((doc, float(score)))
 
         # Sort by score descending
@@ -251,33 +224,16 @@ class Qwen3Reranker:
         """
         Rerank documents and return top-k most relevant results.
 
-        Scores all documents using the cross-encoder model and returns the top-k
-        results sorted by relevance score in descending order.
-
         Args:
             query: The search query string
             documents: List of LangChain Document objects to rerank
-            top_k: Maximum number of documents to return (actual may be less if insufficient documents)
+            top_k: Maximum number of documents to return
 
         Returns:
             List of (Document, score) tuples for top-k results sorted by score descending.
-            Returns fewer than top_k documents if input has fewer than top_k documents.
-
-        Examples:
-            >>> query = "What is machine learning?"
-            >>> reranked = reranker.rerank(query, documents, top_k=4)
-            >>> for doc, score in reranked:
-            ...     print(f"Score: {score:.4f}, Source: {doc.metadata['source']}")
         """
-        scored = self.score_documents(query, documents)
-
-        # Log results
-        logger.info(f"[Reranker] Reranked {len(documents)} → {min(top_k, len(scored))} docs")
-        for i, (doc, score) in enumerate(scored[:top_k], 1):
-            source = doc.metadata.get('source', 'unknown')
-            logger.info(f"  {i}. score={score:.4f} [{source}]")
-
-        return scored[:top_k]
+        scored_docs = self.score_documents(query, documents)
+        return scored_docs[:top_k]
 
 
 # ============================================================================
@@ -817,10 +773,10 @@ class LangChainAgent:
             }
         )
 
-        # Initialize Qwen3 Cross-Encoder Reranker
+        # Initialize BGE Cross-Encoder Reranker
         if ENABLE_RERANKING:
             print(f"Loading cross-encoder reranker: {RERANKER_MODEL}")
-            self.reranker = Qwen3Reranker(model_name=RERANKER_MODEL)
+            self.reranker = BGEReranker(model_name=RERANKER_MODEL)
             print("✓ Reranker initialized")
         else:
             self.reranker = None
@@ -1245,7 +1201,7 @@ Reasoning: {query_analysis}"""
                         doc.metadata['original_rank'] = i
 
                     rerank_start = time.time()
-                    print(f"\n[Reranker] Processing {len(results)} candidates with Qwen3-Reranker-8B...")
+                    print(f"\n[Reranker] Processing {len(results)} candidates with BGE-Reranker...")
                     reranked_results = self.reranker.rerank(query, results, RERANKER_TOP_K)
                     rerank_elapsed = time.time() - rerank_start
 

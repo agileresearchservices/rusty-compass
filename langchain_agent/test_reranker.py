@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Test Qwen3-Reranker-8B cross-encoder implementation"""
+"""Test BGE-Reranker cross-encoder implementation"""
 
 import sys
 import time
 from langchain_core.documents import Document
-from main import Qwen3Reranker
+from main import BGEReranker
 
 
 def show_reranking_comparison(query: str, original_docs, reranked_results):
@@ -46,7 +46,7 @@ def test_langgraph_query():
     print("=" * 70)
 
     try:
-        reranker = Qwen3Reranker(model_name="Qwen/Qwen3-Reranker-8B")
+        reranker = BGEReranker(model_name="BAAI/bge-reranker-v2-m3")
 
         docs = [
             Document(
@@ -91,7 +91,7 @@ def test_rag_query():
     print("=" * 70)
 
     try:
-        reranker = Qwen3Reranker(model_name="Qwen/Qwen3-Reranker-8B")
+        reranker = BGEReranker(model_name="BAAI/bge-reranker-v2-m3")
 
         docs = [
             Document(
@@ -136,7 +136,7 @@ def test_score_range():
     print("=" * 70)
 
     try:
-        reranker = Qwen3Reranker(model_name="Qwen/Qwen3-Reranker-8B")
+        reranker = BGEReranker(model_name="BAAI/bge-reranker-v2-m3")
 
         docs = [
             Document(page_content="LangChain agents use tools to interact with external systems", metadata={"source": "agents.mdx"}),
@@ -184,7 +184,7 @@ def test_relevance_ordering():
     print("=" * 70)
 
     try:
-        reranker = Qwen3Reranker(model_name="Qwen/Qwen3-Reranker-8B")
+        reranker = BGEReranker(model_name="BAAI/bge-reranker-v2-m3")
 
         docs = [
             Document(
@@ -245,7 +245,7 @@ def test_performance():
     print("=" * 70)
 
     try:
-        reranker = Qwen3Reranker(model_name="Qwen/Qwen3-Reranker-8B")
+        reranker = BGEReranker(model_name="BAAI/bge-reranker-v2-m3")
 
         # Create test documents
         docs = [
@@ -295,7 +295,7 @@ def test_empty_documents():
     print("=" * 70)
 
     try:
-        reranker = Qwen3Reranker(model_name="Qwen/Qwen3-Reranker-8B")
+        reranker = BGEReranker(model_name="BAAI/bge-reranker-v2-m3")
 
         # Test with empty list
         results = reranker.rerank("test query", [], top_k=4)
@@ -346,7 +346,7 @@ def reranker_safe_cleanup(reranker):
 def main():
     """Run all tests"""
     print("\n" + "=" * 70)
-    print("QWEN3-RERANKER-8B CROSS-ENCODER TESTS")
+    print("BGE-RERANKER CROSS-ENCODER TESTS")
     print("=" * 70)
 
     tests = [
@@ -380,7 +380,7 @@ def main():
     print("=" * 70)
 
     if failed == 0:
-        print("\n✓ All tests passed! Qwen3-Reranker is working correctly.\n")
+        print("\n✓ All tests passed! BGE-Reranker is working correctly.\n")
     else:
         print(f"\n✗ {failed} test(s) failed.\n")
 

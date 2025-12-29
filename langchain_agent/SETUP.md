@@ -86,8 +86,8 @@ This handles all initialization in 7 steps:
       [Embeddings model] nomic-embed-text:latest
             Pulling nomic-embed-text:latest...
             ✓ Model pulled successfully
-      [Reranker model] Qwen/Qwen3-Reranker-8B
-            Pulling Qwen/Qwen3-Reranker-8B...
+      [Reranker model] BAAI/bge-reranker-v2-m3
+            Pulling BAAI/bge-reranker-v2-m3...
             ✓ Model pulled successfully
 ```
 
@@ -164,8 +164,8 @@ ollama pull gpt-oss:20b
 # Embeddings model
 ollama pull nomic-embed-text:latest
 
-# Reranker model
-ollama pull Qwen/Qwen3-Reranker-8B
+# Reranker model (downloaded via HuggingFace on first run)
+# BAAI/bge-reranker-v2-m3
 ```
 
 ### Step 5: Load Sample Data
@@ -186,7 +186,7 @@ All settings are in `config.py`:
 # Ollama models
 LLM_MODEL = "gpt-oss:20b"
 EMBEDDINGS_MODEL = "nomic-embed-text:latest"
-RERANKER_MODEL = "Qwen/Qwen3-Reranker-8B"
+RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 OLLAMA_BASE_URL = "http://localhost:11434"
 
 # PostgreSQL
@@ -208,7 +208,7 @@ RETRIEVER_LAMBDA_MULT = 0.25  # 75% lexical + 25% semantic
 
 # Reranking
 ENABLE_RERANKING = True  # always enabled
-RERANKER_MODEL = "Qwen/Qwen3-Reranker-8B"
+RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 RERANKER_FETCH_K = 15  # candidates to rerank
 RERANKER_TOP_K = 4  # final documents after reranking
 ```
@@ -232,10 +232,10 @@ EMBEDDINGS_MODEL = "nomic-embed-text:latest"
 
 **Different Reranker**:
 ```python
-# Faster, smaller (440MB)
+# Default, fast (~2.3GB)
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
-# Larger, more accurate
+# Larger, more accurate (~1.2GB)
 RERANKER_MODEL = "BAAI/bge-reranker-v2-large"
 ```
 
@@ -307,17 +307,17 @@ which ollama
 ollama serve
 ```
 
-### Reranker Model Too Large
+### Reranker Model Download Issues
 
 ```
-⚠ Timeout pulling Qwen/Qwen3-Reranker-8B (model too large?)
+⚠ Timeout pulling BAAI/bge-reranker-v2-m3
 ```
 
 **Solution**:
-Use a smaller reranker model:
+Check your internet connection and retry. The model is ~2.3GB and should download in 1-2 minutes:
 ```python
-# In config.py
-RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"  # 440MB instead of 16GB
+# Alternatively, disable reranking in config.py
+ENABLE_RERANKING = False
 ```
 
 ## Verification
@@ -366,7 +366,7 @@ python main.py
 ## Performance Expectations
 
 ### First Run Times
-- Model pulling: 5-30 minutes (16GB downloads for Qwen reranker)
+- Model pulling: 2-10 minutes (~2.3GB download for BGE reranker)
 - Database setup: < 1 minute
 - Sample data load: 2-5 minutes (embeddings generation)
 - Total: 10-40 minutes depending on internet speed

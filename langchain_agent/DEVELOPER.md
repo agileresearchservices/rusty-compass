@@ -8,7 +8,7 @@ Information for developers extending or modifying the LangChain Agent.
 
 ```
 main.py
-├── Qwen3Reranker (Lines 94-230)
+├── BGEReranker (Lines 94-230)
 │   ├── __init__: Load cross-encoder model from HuggingFace
 │   ├── _format_input: Format query-document pairs
 │   ├── score_documents: Score relevance of documents
@@ -64,7 +64,7 @@ Tool Call: knowledge_base(query)
     - Full-text search (GIN index)
     Result: 15 candidates
     ↓
-[Qwen3 Reranker] Score candidates with cross-encoder
+[BGE Reranker] Score candidates with cross-encoder
     Result: 4 highest-scoring documents
     ↓
 [Document Grader] Evaluate each document's relevance
@@ -146,32 +146,29 @@ python test_reflection.py
 
 ## Component Details
 
-### Qwen3Reranker
+### BGEReranker
 
-**Model**: `Qwen/Qwen3-Reranker-8B` from HuggingFace
+**Model**: `BAAI/bge-reranker-v2-m3` from HuggingFace
 
 **How it works**:
-1. Load as causal language model (not embedding model)
-2. Format input: `<Instruct>: ... \n<Query>: ... \n<Document>: ...`
-3. Get model output logits at last token position
-4. Compute P(yes) = softmax([no_logit, yes_logit])[1]
-5. Return scores in [0.0, 1.0] range
+1. Load cross-encoder model using AutoModelForSequenceClassification
+2. Format input as query-document pairs
+3. Get relevance score from model output
+4. Return scores in [0.0, 1.0] range
 
 **Key code**:
 ```python
-class Qwen3Reranker:
-    def __init__(self, model_name="Qwen/Qwen3-Reranker-8B"):
+class BGEReranker:
+    def __init__(self, model_name="BAAI/bge-reranker-v2-m3"):
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.yes_token_id = tokenizer.convert_tokens_to_ids("yes")
-        self.no_token_id = tokenizer.convert_tokens_to_ids("no")
 ```
 
 **Why this works**:
 - Cross-encoder directly evaluates query-document relevance
 - Pre-trained on huge corpus of relevance judgments
-- 8B parameters capture nuanced semantic understanding
+- Compact size (~2.3GB) with good accuracy
 - Multilingual support (100+ languages)
 
 ### Hybrid Search
@@ -409,8 +406,8 @@ LLM_MODEL = "llama2:13b"  # or any Ollama model
 
 ```python
 # In config.py
-RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"  # Smaller (440MB)
-RERANKER_MODEL = "BAAI/bge-reranker-v2-large"  # Larger
+RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"  # Default (~2.3GB)
+RERANKER_MODEL = "BAAI/bge-reranker-v2-large"  # Larger, more accurate
 
 # In config.py - make reranking optional
 ENABLE_RERANKING = False  # Disable for speed
@@ -447,7 +444,7 @@ def cached_embed(text):
 python -c "
 from transformers import AutoModel, AutoTokenizer
 import torch
-model_name = 'Qwen/Qwen3-Reranker-8B'
+model_name = 'BAAI/bge-reranker-v2-m3'
 tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
 # Check outputs.logits shape and values
@@ -482,13 +479,10 @@ RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
 ### High Memory Usage
 
-**Cause**: Qwen3-Reranker-8B model (16GB)
+**Cause**: Large models consuming GPU memory
 
 **Solutions**:
 ```python
-# Use smaller reranker
-RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"  # 440MB
-
 # Disable reranking
 ENABLE_RERANKING = False
 
@@ -595,7 +589,7 @@ EXPLAIN ANALYZE SELECT * FROM document_chunks WHERE embedding <-> $1 LIMIT 4;
 
 - **LangGraph**: https://langchain-ai.github.io/langgraph/
 - **LangChain**: https://python.langchain.com/
-- **Qwen3 Reranker**: https://huggingface.co/Qwen/Qwen3-Reranker-8B
+- **BGE Reranker**: https://huggingface.co/BAAI/bge-reranker-v2-m3
 - **PGVector**: https://github.com/pgvector/pgvector
 - **Ollama**: https://ollama.com/
 
