@@ -279,50 +279,87 @@ Try these to test the agent's knowledge retrieval:
 
 ## Architecture
 
-### Components
+### System Components
 
-```
-┌─────────────────────────────────────────────────────┐
-│                   User Input                         │
-└────────────────────┬────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────┐
-│             LLM (gpt-oss:20b)                       │
-│         ReAct Agent Decision Making                  │
-└────────────────────┬────────────────────────────────┘
-                     │
-         ┌───────────┴───────────┐
-         ▼                       ▼
-┌──────────────────┐   ┌─────────────────────┐
-│ Knowledge Base   │   │   Conversation      │
-│ (PostgreSQL +    │   │   Memory (Postgres) │
-│  PGVector)       │   │                     │
-│                  │   │                     │
-│ • Documents      │   │ • Chat History      │
-│ • Embeddings     │   │ • State/Context     │
-│ • Vector Index   │   │ • Thread IDs        │
-└──────────────────┘   └─────────────────────┘
+```mermaid
+flowchart TB
+    subgraph User["User Interface"]
+        CLI["CLI (main.py)"]
+        API["FastAPI + WebSocket"]
+    end
+
+    subgraph Agent["LangGraph ReAct Agent"]
+        QE["Query Evaluator"]
+        REACT["ReAct Loop"]
+        TOOLS["Knowledge Base Tool"]
+    end
+
+    subgraph Search["Hybrid Search"]
+        VS["Vector Search<br/>(768-dim)"]
+        TS["Full-Text Search"]
+        RRF["RRF Fusion"]
+        RERANK["BGE Reranker"]
+    end
+
+    subgraph Reflection["Reflection Loop"]
+        DG["Document Grader"]
+        QT["Query Transformer"]
+        RG["Response Grader"]
+    end
+
+    subgraph Storage["PostgreSQL + PGVector"]
+        DOCS["Documents"]
+        CHUNKS["Chunks + Embeddings"]
+        MEM["Checkpoints"]
+    end
+
+    subgraph LLM["Ollama"]
+        MODEL["gpt-oss:20b"]
+        EMB["nomic-embed-text"]
+    end
+
+    User --> Agent
+    Agent --> Search
+    Search --> Reflection
+    Reflection --> Agent
+    Agent --> LLM
+    Search --> Storage
+    Agent --> MEM
 ```
 
 ### Data Flow
 
+```mermaid
+flowchart LR
+    Q["1. User Query"] --> QE["2. Query Evaluator<br/>Classify → Set λ"]
+    QE --> REACT["3. ReAct Agent"]
+    REACT --> HYBRID["4. Hybrid Search<br/>Vector + Full-text"]
+    HYBRID --> RRF["5. RRF Fusion<br/>15 candidates"]
+    RRF --> RERANK["6. BGE Reranker<br/>→ Top 4"]
+    RERANK --> DG["7. Document Grader"]
+    DG --> GEN["8. Generate Response"]
+    GEN --> RG["9. Response Grader"]
+    RG --> STREAM["10. Stream Output"]
+```
+
+### Processing Steps
+
 1. **User Query** → Agent receives input
-2. **Reasoning** → LLM decides if retrieval is needed
-3. **Dynamic Query Evaluation** → LLM classifies query type to determine optimal search strategy
-4. **Hybrid Search** → PostgreSQL with PGVector performs combined vector + full-text search
-   - Vector search: Semantic similarity based on embeddings
-   - Lexical search: Full-text keyword matching
-   - RRF Fusion: Reciprocal rank fusion combines both results (~15 candidates)
-5. **Cross-Encoder Reranking** → BGE-Reranker scores candidates by relevance (→ top 4)
-6. **Document Grading** → LLM evaluates each document's relevance to the query
-   - If documents fail grading, query is transformed and retrieval retries (max 2 iterations)
-7. **Response Generation** → LLM generates response based on graded documents
-8. **Response Grading** → LLM evaluates response quality (relevance, completeness, clarity)
-   - If response fails grading (incomplete/truncated), feedback is added and response retries (max 2 iterations)
-9. **Title Generation** → LLM generates/updates a concise conversation title
-10. **Memory Storage** → Conversation state and title saved to PostgreSQL
-11. **Output** → Response sent to user with character-by-character streaming
+2. **Query Evaluation** → LLM classifies query type, sets lambda (vector vs. lexical weight)
+3. **ReAct Reasoning** → LLM decides if retrieval is needed
+4. **Hybrid Search** → PostgreSQL with PGVector performs combined search:
+   - Vector search: Semantic similarity (768-dim embeddings)
+   - Full-text search: Keyword matching (tsvector/tsquery)
+   - RRF Fusion: Combines rankings (~15 candidates)
+5. **Cross-Encoder Reranking** → BGE model scores relevance (→ top 4)
+6. **Document Grading** → LLM evaluates each document's relevance
+   - If documents fail: Query Transformer rewrites and retries (max 2)
+7. **Response Generation** → LLM generates response from graded documents
+8. **Response Grading** → LLM evaluates quality (relevance, completeness, clarity)
+   - If response fails: Response Improver adds feedback and retries (max 2)
+9. **Title Generation** → LLM generates/updates conversation title
+10. **Memory Storage** → State saved to PostgreSQL checkpoints
+11. **Streaming Output** → Response streamed token-by-token
 
 ## File Structure
 
@@ -423,16 +460,26 @@ The agent includes a reflection loop that grades retrieved documents and respons
 - **REFLECTION_SHOW_STATUS**: Display reflection status in output (default: `True`)
 
 **How It Works:**
-```
-query_evaluator → agent → tools → document_grader
-                                       ↓
-                              (docs good?) → agent → response_grader
-                                       ↓                    ↓
-                              (docs bad?)           (response good?) → END
-                                       ↓                    ↓
-                              query_transformer    (response bad?) → response_improver → agent (retry)
-                                       ↓
-                                     retry
+
+```mermaid
+flowchart TD
+    QE["Query Evaluator"] --> AGENT["Agent"]
+    AGENT --> TOOLS["Retrieve Documents"]
+    TOOLS --> DG["Document Grader"]
+
+    DG -->|"docs pass"| GEN["Generate Response"]
+    DG -->|"docs fail & retry < max"| QT["Query Transformer"]
+    QT --> QE
+
+    GEN --> RG["Response Grader"]
+    RG -->|"response good"| END["Stream to User"]
+    RG -->|"response bad & retry < max"| RI["Response Improver"]
+    RI --> AGENT
+
+    style DG fill:#e1f5fe
+    style RG fill:#e1f5fe
+    style QT fill:#fff3e0
+    style RI fill:#fff3e0
 ```
 
 1. After retrieving documents, the **Document Grader** evaluates each document's relevance
