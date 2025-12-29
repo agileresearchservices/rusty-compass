@@ -279,6 +279,7 @@ class CustomAgentState(TypedDict):
     response_grade: ReflectionResult              # Quality of final response
     original_query: str                           # Preserve original for transformation
     transformed_query: Optional[str]              # Rewritten query if docs were poor
+    force_retrieval_retry: Optional[bool]         # Force agent to call knowledge_base after transformation
 
 
 # ============================================================================
@@ -950,6 +951,20 @@ Respond with ONLY JSON:
 
         print(f"\n[Agent Node] Processing {len(messages)} messages...")
 
+        # Check if we need to force a retrieval retry after query transformation
+        force_retrieval = state.get("force_retrieval_retry", False)
+        if force_retrieval:
+            # Inject strong instruction to use knowledge_base tool
+            transformed_query = state.get("transformed_query", "")
+            force_instruction = SystemMessage(content=f"""IMPORTANT: You MUST search the knowledge base before answering.
+
+The previous search returned poor results, so the query has been transformed.
+You MUST call the knowledge_base tool with this transformed query: "{transformed_query}"
+
+DO NOT answer from your own knowledge. Search the knowledge base first.""")
+            messages.insert(0, force_instruction)
+            print(f"[Agent Node] Forced retrieval retry with transformed query")
+
         # Inject Query Evaluator's recommendation with pre-optimized query
         # This provides stronger guidance including the actual optimized query
         lambda_mult = state.get("lambda_mult", 0.25)
@@ -1244,7 +1259,8 @@ Reasoning: {query_analysis}"""
                 if ENABLE_REFLECTION and ENABLE_DOCUMENT_GRADING:
                     result_dict = {
                         "messages": tool_responses,
-                        "retrieved_documents": results
+                        "retrieved_documents": results,
+                        "force_retrieval_retry": False  # Clear flag after retrieval completes
                     }
 
                     # Optimization: Skip LLM document grading if reranker confidence is high
@@ -1602,8 +1618,9 @@ Respond with ONLY the rewritten query, nothing else."""
         new_iteration = state.get("iteration_count", 0) + 1
 
         # Create new user message with transformed query for retry
+        # Use explicit instruction to ensure agent searches knowledge base
         retry_message = HumanMessage(
-            content=f"[Retry with transformed query] {transformed}"
+            content=f"Search the knowledge base for: {transformed}"
         )
 
         # Track previous score for effectiveness analysis
@@ -1619,7 +1636,8 @@ Respond with ONLY the rewritten query, nothing else."""
             "retrieved_documents": [],  # Clear previous documents
             "document_grades": [],
             "document_grade_summary": {},
-            "previous_doc_score": previous_score  # TIER 3: Track for effectiveness analysis
+            "previous_doc_score": previous_score,  # TIER 3: Track for effectiveness analysis
+            "force_retrieval_retry": True  # Force agent to call knowledge_base
         }
 
     def response_grader_node(self, state: CustomAgentState) -> Dict[str, Any]:
