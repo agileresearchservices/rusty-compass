@@ -170,10 +170,10 @@ ENABLE_RERANKING = True
 #   - "BAAI/bge-reranker-v2-large" (more accurate but slower)
 #   - "Qwen/Qwen3-Reranker-8B" (multilingual, state-of-the-art)
 #   - "Qwen/Qwen3-Reranker-4B" (faster, smaller)
-RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
+RERANKER_MODEL = "Qwen/Qwen3-Reranker-8B"
 
 # Number of candidates to fetch before reranking
-RERANKER_FETCH_K = 8
+RERANKER_FETCH_K = 15
 
 # Final number of documents to return after reranking
 RERANKER_TOP_K = 4
@@ -294,7 +294,7 @@ REFLECTION_SHOW_STATUS = True
 DOCUMENT_GRADING_BATCH_SIZE = 5
 
 # Skip document grading (skip LLM calls) if average reranker confidence exceeds this threshold
-# High reranker scores (>0.95) already indicate relevance, making LLM grading redundant
+# High reranker scores (>0.95) from Qwen3-Reranker already indicate relevance
 # Set to 1.0 to always grade, 0.0 to never grade (optimization: ~6s savings on 60% of queries)
 DOCUMENT_GRADING_CONFIDENCE_THRESHOLD = 0.95
 

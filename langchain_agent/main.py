@@ -184,57 +184,63 @@ class Qwen3Reranker:
         """Format input according to Qwen3-Reranker specification"""
         return f"<Instruct>: {self.instruction}\n<Query>: {query}\n<Document>: {document}"
 
-    def score_documents(self, query: str, documents: List[Document]) -> List[tuple[Document, float]]:
+    def score_documents(self, query: str, documents: List[Document], batch_size: int = 8) -> List[tuple[Document, float]]:
         """
-        Score documents by relevance to query using cross-encoder model.
+        Score documents by relevance to query using batch processing for speed.
 
-        Uses Qwen3-Reranker to evaluate query-document pairs and assign relevance scores.
+        OPTIMIZED: Processes multiple documents in single forward pass instead of one-by-one.
+        Expected speedup: 7-10x (105s → 10-15s for 15 documents).
 
         Args:
             query: The search query string
             documents: List of LangChain Document objects to score
+            batch_size: Number of documents to process per batch (default: 8)
 
         Returns:
             List of (Document, score) tuples sorted by score in descending order.
             Scores are in range [0.0, 1.0] representing P(relevant)
-
-        Raises:
-            ValueError: If documents list is empty
         """
         if not documents:
             return []
 
         scores = []
 
-        for doc in documents:
-            # Format input according to model requirements
-            formatted_input = self._format_input(query, doc.page_content)
+        # Process documents in batches
+        for batch_idx in range(0, len(documents), batch_size):
+            batch_docs = documents[batch_idx:batch_idx + batch_size]
+
+            # Format all documents in batch
+            formatted_inputs = [self._format_input(query, doc.page_content) for doc in batch_docs]
 
             with torch.no_grad():
-                # Tokenize
+                # Batch tokenization (all at once, not one-by-one)
                 inputs = self.tokenizer(
-                    formatted_input,
+                    formatted_inputs,
                     padding=True,
                     truncation=True,
                     return_tensors="pt",
                     max_length=8192
                 ).to(self.device)
 
-                # Get model output
+                # Single forward pass for entire batch (key optimization!)
                 outputs = self.model(**inputs)
 
-                # Extract logits from the last token (what the model predicted at end)
+                # Extract logits from last token for all documents in batch
                 logits = outputs.logits[:, -1, :]  # [batch_size, vocab_size]
 
-                # Compute score from yes/no token probabilities
-                # Stack yes and no logits for softmax computation
-                batch_scores = torch.stack([logits[:, self.no_token_id], logits[:, self.yes_token_id]], dim=1)
-                # Apply log_softmax for numerical stability
+                # Compute scores from yes/no token probabilities
+                batch_scores = torch.stack(
+                    [logits[:, self.no_token_id], logits[:, self.yes_token_id]],
+                    dim=1
+                )
                 batch_scores = torch.nn.functional.log_softmax(batch_scores, dim=1)
-                # Extract probability of "yes" (index 1)
-                score = float(torch.exp(batch_scores[0, 1]).cpu())
 
-            scores.append((doc, score))
+                # Extract probability of "yes" for each document in batch
+                batch_probs = torch.exp(batch_scores[:, 1]).cpu().numpy()
+
+                # Pair each document with its score
+                for doc, score in zip(batch_docs, batch_probs):
+                    scores.append((doc, float(score)))
 
         # Sort by score descending
         scores.sort(key=lambda x: x[1], reverse=True)
