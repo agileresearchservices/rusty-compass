@@ -852,6 +852,29 @@ class LangChainAgent:
                 "optimized_query": query_lower
             }
 
+        # Pattern 2b: Error messages and exceptions (need keyword matching)
+        error_keywords = ["error", "exception", "failed", "cannot", "unable", "traceback", "importerror", "typeerror", "valueerror", "keyerror", "attributeerror", "modulenotfounderror"]
+        if any(kw in query_lower for kw in error_keywords):
+            print(f"[Query Evaluator] ⚡ Fast-path: Lexical-Heavy (error message/exception)")
+            elapsed = time.time() - start_time
+            print(f"  Evaluation time: {elapsed:.3f}s (skipped LLM, used heuristic)")
+            return {
+                "lambda_mult": 0.25,
+                "query_analysis": "Fast-path: Error message → Lexical-heavy search",
+                "optimized_query": last_user_msg  # Preserve exact error text
+            }
+
+        # Pattern 2c: CamelCase class/function names (specific identifiers need keyword matching)
+        if re.search(r'\b[A-Z][a-z]+[A-Z][a-zA-Z]*\b', last_user_msg):  # CamelCase pattern
+            print(f"[Query Evaluator] ⚡ Fast-path: Lexical-Heavy (CamelCase identifier)")
+            elapsed = time.time() - start_time
+            print(f"  Evaluation time: {elapsed:.3f}s (skipped LLM, used heuristic)")
+            return {
+                "lambda_mult": 0.30,
+                "query_analysis": "Fast-path: Class/function name → Lexical-heavy search",
+                "optimized_query": last_user_msg  # Preserve exact class name
+            }
+
         # Pattern 3: Balanced queries (how to, tutorial, guide, example, tips)
         if any(word in query_lower for word in ["how to", "tutorial", "guide", "example", "tips", "best practices", "template"]):
             print(f"[Query Evaluator] ⚡ Fast-path: Balanced (practical how-to query)")
