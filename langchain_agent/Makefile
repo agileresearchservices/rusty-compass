@@ -1,4 +1,4 @@
-.PHONY: help setup test lint format clean run test-reranker test-hybrid test-query dev dev-api dev-web install-web
+.PHONY: help setup test lint format clean run stop test-reranker test-hybrid test-query dev dev-api dev-web install-web
 
 help:
 	@echo "Rusty Compass - Development Commands"
@@ -23,6 +23,7 @@ help:
 	@echo "  make dev                - Start full dev environment (API + Web UI)"
 	@echo "  make dev-api            - Start FastAPI backend only (port 8000)"
 	@echo "  make dev-web            - Start React frontend only (port 5173)"
+	@echo "  make stop               - Stop all running services"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean              - Remove generated files and caches"
@@ -75,6 +76,16 @@ type-check:
 run:
 	@echo "Starting Rusty Compass agent..."
 	python3 main.py
+
+stop:
+	@echo "Stopping all services..."
+	@echo "  Stopping Python processes..."
+	pkill -f "python.*main.py" || true
+	pkill -f "uvicorn" || true
+	@echo "  Stopping npm/Node processes..."
+	pkill -f "npm.*dev" || true
+	pkill -f "vite" || true
+	@echo "✓ All services stopped"
 
 clean:
 	@echo "Cleaning up generated files..."
