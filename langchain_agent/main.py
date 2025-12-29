@@ -1345,6 +1345,15 @@ Reasoning: {query_analysis}"""
 
         # If docs are bad but can retry (and query transformation is enabled)
         if ENABLE_QUERY_TRANSFORMATION and iteration < REFLECTION_MAX_ITERATIONS:
+            # TIER 3 OPTIMIZATION: Check if previous transformation actually helped
+            current_score = doc_summary.get("score", 0.0)
+            previous_score = state.get("previous_doc_score", 0.0)
+
+            # If last transformation made things WORSE, stop retrying (diminishing returns)
+            if iteration > 0 and current_score < previous_score:
+                print(f"[Reflection] Query transformation degraded results ({previous_score:.2f} → {current_score:.2f}). Proceeding with available documents.")
+                return "agent"
+
             print(f"[Reflection] Documents failed grading. Retry {iteration + 1}/{REFLECTION_MAX_ITERATIONS}")
             return "query_transformer"
 
@@ -1463,17 +1472,68 @@ Reasoning: {query_analysis}"""
         relevant_count = sum(1 for g in grades if g["relevant"])
         avg_score = sum(g["score"] for g in grades) / len(grades) if grades else 0.0
 
-        # TIER 2 OPTIMIZATION: Adaptive thresholds - relax on retries (diminishing returns)
+        # TIER 3 OPTIMIZATION: Confidence-based early exit
+        # If we have 2+ docs with high confidence scores (0.7+), that's a strong signal - no need to retry
+        high_confidence_docs = sum(1 for g in grades if g["score"] >= 0.7)
+        if high_confidence_docs >= 2:
+            passed = True  # Override: strong positive signal
+            summary = {
+                "grade": "pass",
+                "score": avg_score,
+                "reasoning": f"{high_confidence_docs} high-confidence documents (scores >= 0.7)"
+            }
+
+            elapsed = time.time() - start_time
+            if REFLECTION_SHOW_STATUS:
+                status_icon = "✓"
+                print(f"\n[Document Grader] {status_icon} {summary['reasoning']}")
+                print(f"  Grading time: {elapsed:.3f}s")
+
+                # Show iteration progress
+                iteration = state.get("iteration_count", 0)
+                max_iterations = REFLECTION_MAX_ITERATIONS
+                print(f"  Iteration: {iteration + 1} / {max_iterations + 1} max attempts")
+
+            return {
+                "document_grades": grades,
+                "document_grade_summary": summary,
+                "original_query": original_query
+            }
+
+        # TIER 3 OPTIMIZATION: Strategy-based thresholds (configurable reflection strategy)
+        from config import REFLECTION_STRATEGY, REFLECTION_ENABLE_CONFIDENCE_EXIT, REFLECTION_TRACK_TRANSFORMATION_EFFECTIVENESS
+
         iteration = state.get("iteration_count", 0)
 
+        # Apply strategy-based thresholds
+        if REFLECTION_STRATEGY == "strict":
+            # Original thresholds: require 2/4 docs + 0.5+ score
+            base_min_docs = 2
+            base_min_score = 0.5
+        elif REFLECTION_STRATEGY == "lenient":
+            # Lenient: require 1/4 docs + 0.2+ score (fast)
+            base_min_docs = 1
+            base_min_score = 0.2
+        else:  # "moderate" (default)
+            # Moderate: require 1/4 docs + 0.3+ score (balanced)
+            base_min_docs = 1
+            base_min_score = 0.3
+
+        # Apply adaptive adjustment on retries (diminishing returns)
         if iteration == 0:
-            # Initial attempt: use configured thresholds
-            min_docs_required = REFLECTION_MIN_RELEVANT_DOCS  # 1
-            min_score_required = REFLECTION_DOC_SCORE_THRESHOLD  # 0.3
+            # Initial attempt: use strategy base thresholds
+            min_docs_required = base_min_docs
+            min_score_required = base_min_score
         else:
             # Retry attempt: be more lenient (transformation rarely helps)
-            min_docs_required = max(1, REFLECTION_MIN_RELEVANT_DOCS - 1)  # Still 1
-            min_score_required = max(0.25, REFLECTION_DOC_SCORE_THRESHOLD - 0.15)  # 0.15
+            if REFLECTION_STRATEGY == "strict":
+                # Strict: relax from 2/4 to 1/4, from 0.5 to 0.35
+                min_docs_required = 1
+                min_score_required = 0.35
+            else:
+                # Moderate/Lenient: relax further
+                min_docs_required = max(1, base_min_docs - 1)
+                min_score_required = max(0.15, base_min_score - 0.15)
 
         # Pass if we have enough relevant documents
         passed = relevant_count >= min_docs_required and avg_score >= min_score_required
@@ -1590,6 +1650,9 @@ Respond with ONLY the rewritten query, nothing else."""
             content=f"[Retry with transformed query] {transformed}"
         )
 
+        # Track previous score for effectiveness analysis
+        previous_score = state.get("document_grade_summary", {}).get("score", 0.0)
+
         return {
             "transformed_query": transformed,
             "iteration_count": new_iteration,
@@ -1598,7 +1661,8 @@ Respond with ONLY the rewritten query, nothing else."""
             "optimized_query": None,  # Clear to force re-evaluation
             "retrieved_documents": [],  # Clear previous documents
             "document_grades": [],
-            "document_grade_summary": {}
+            "document_grade_summary": {},
+            "previous_doc_score": previous_score  # TIER 3: Track for effectiveness analysis
         }
 
     def response_grader_node(self, state: CustomAgentState) -> Dict[str, Any]:

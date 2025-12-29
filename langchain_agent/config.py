@@ -82,6 +82,10 @@ __all__ = [
     # Response grading confidence-based early stopping
     "RESPONSE_GRADING_HIGH_CONFIDENCE_THRESHOLD",
     "RESPONSE_GRADING_LOW_CONFIDENCE_RETRY",
+    # Advanced reflection tuning (Tier 3)
+    "REFLECTION_STRATEGY",
+    "REFLECTION_ENABLE_CONFIDENCE_EXIT",
+    "REFLECTION_TRACK_TRANSFORMATION_EFFECTIVENESS",
     # Observable agent streaming configuration
     "ENABLE_ASYNC_STREAMING",
 ]
@@ -323,6 +327,24 @@ RESPONSE_GRADING_HIGH_CONFIDENCE_THRESHOLD = 0.85
 # If confidence < this value AND retry_count < max, always retry regardless of grade
 # Example: 0.5 means "if we're less than 50% confident, force a retry"
 RESPONSE_GRADING_LOW_CONFIDENCE_RETRY = 0.5
+
+# ============================================================================
+# ADVANCED REFLECTION TUNING (TIER 3 OPTIMIZATIONS)
+# ============================================================================
+
+# Reflection strategy: "strict" (high precision), "moderate" (balanced), "lenient" (fast)
+# - "strict": Original thresholds (2/4 docs, 0.5+ score) - highest precision, more retries
+# - "moderate": Balanced (1/4 docs, 0.3+ score) - good balance, fewer retries - RECOMMENDED
+# - "lenient": Fast mode (1/4 docs, 0.2+ score) - fastest, may miss issues
+REFLECTION_STRATEGY = "moderate"
+
+# Enable confidence-based early exit (auto-pass if 2+ docs score 0.7+)
+# Skips further retries when we have strong signal - saves time on queries with good matches
+REFLECTION_ENABLE_CONFIDENCE_EXIT = True
+
+# Track transformation effectiveness (stop if transformation makes things worse)
+# Detects when query rewriting degrades results and avoids wasteful retries
+REFLECTION_TRACK_TRANSFORMATION_EFFECTIVENESS = True
 
 # ============================================================================
 # OBSERVABLE AGENT STREAMING CONFIGURATION
