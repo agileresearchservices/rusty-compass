@@ -129,18 +129,32 @@ async def get_conversation(thread_id: str):
 
                 if checkpoint_row and checkpoint_row[0]:
                     # Parse checkpoint to extract messages
-                    # This is a simplified extraction - actual format may vary
+                    # Handles both dict and object message formats
                     checkpoint = checkpoint_row[0]
                     if isinstance(checkpoint, dict):
                         channel_values = checkpoint.get("channel_values", {})
                         raw_messages = channel_values.get("messages", [])
 
                         for msg in raw_messages:
-                            if hasattr(msg, "content"):
-                                messages.append({
-                                    "type": getattr(msg, "type", "unknown"),
-                                    "content": msg.content,
-                                })
+                            # Handle dict format (from JSON serialization)
+                            if isinstance(msg, dict):
+                                content = msg.get("content", "")
+                                msg_type = msg.get("type", "unknown")
+                                # Skip tool messages and empty content
+                                if content and msg_type in ("human", "ai"):
+                                    messages.append({
+                                        "type": msg_type,
+                                        "content": content,
+                                    })
+                            # Handle object format (LangChain message objects)
+                            elif hasattr(msg, "content"):
+                                content = msg.content
+                                msg_type = getattr(msg, "type", "unknown")
+                                if content and msg_type in ("human", "ai"):
+                                    messages.append({
+                                        "type": msg_type,
+                                        "content": content,
+                                    })
 
                 return ConversationDetail(
                     thread_id=thread_id,

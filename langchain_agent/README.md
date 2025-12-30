@@ -165,12 +165,40 @@ You can now run the agent:
   python main.py
 ```
 
-### Start the Agent
-Run the interactive agent:
+### Start the Agent (CLI)
+Run the interactive command-line agent:
 
 ```bash
 python main.py
 ```
+
+### Start the Web UI
+Run the web interface with real-time observability:
+
+```bash
+# Terminal 1: Start the API server
+cd api && uvicorn main:app --reload --port 8000
+
+# Terminal 2: Start the frontend
+cd web && npm run dev
+```
+
+Then open http://localhost:5173 in your browser.
+
+**Web UI Features:**
+- **Conversation Sidebar**: View, switch between, and delete previous conversations
+- **Real-time Chat**: Send messages and see streaming responses
+- **Observability Panel**: Watch the agent's execution in real-time
+  - Step-by-step node execution (Query Evaluator → Agent → Tools → Graders)
+  - Document retrieval and reranking details
+  - Response grading scores and feedback
+- **Agent Graph**: Visual workflow diagram showing node execution
+- **Metrics View**: Performance timing breakdown
+
+**Conversation Management:**
+- New conversations automatically appear in the sidebar after the first message
+- Click any conversation to load its full message history
+- Conversations persist across browser sessions
 
 ## Usage
 

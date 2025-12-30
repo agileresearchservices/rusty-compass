@@ -14,17 +14,15 @@ interface ConversationItemProps {
 }
 
 export function ConversationItem({ conversation, isActive }: ConversationItemProps) {
-  const { setThreadId, clearMessages, setConversations, conversations } = useChatStore()
+  const { loadConversation, setConversations, conversations } = useChatStore()
   const { clearState } = useObservabilityStore()
 
-  const handleSelect = useCallback(() => {
+  const handleSelect = useCallback(async () => {
     if (isActive) return
 
-    setThreadId(conversation.thread_id)
-    clearMessages()
     clearState()
-    // TODO: Load conversation history from checkpoint
-  }, [isActive, conversation.thread_id, setThreadId, clearMessages, clearState])
+    await loadConversation(conversation.thread_id)
+  }, [isActive, conversation.thread_id, loadConversation, clearState])
 
   const handleDelete = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation()

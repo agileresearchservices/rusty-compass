@@ -49,6 +49,9 @@ interface ChatState {
   clearMessages: () => void
   setConversations: (conversations: ConversationSummary[]) => void
   setConversationsLoading: (loading: boolean) => void
+  upsertConversation: (conversation: ConversationSummary) => void
+  setMessages: (messages: ChatMessage[]) => void
+  loadConversation: (threadId: string) => Promise<void>
   startNewConversation: () => void
   setConnectionState: (connected: boolean, connecting: boolean, error: string | null) => void
 }
@@ -128,6 +131,50 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setConversations: (conversations) => set({ conversations }),
 
   setConversationsLoading: (loading) => set({ conversationsLoading: loading }),
+
+  upsertConversation: (conversation) => set((state) => {
+    const existingIndex = state.conversations.findIndex(
+      (c) => c.thread_id === conversation.thread_id
+    )
+    if (existingIndex >= 0) {
+      // Update existing conversation and move to top
+      const updated = [...state.conversations]
+      updated.splice(existingIndex, 1)
+      return { conversations: [conversation, ...updated] }
+    } else {
+      // Add new conversation at the top
+      return { conversations: [conversation, ...state.conversations] }
+    }
+  }),
+
+  setMessages: (messages) => set({ messages }),
+
+  loadConversation: async (threadId) => {
+    try {
+      const response = await fetch(`/api/conversations/${threadId}`)
+      if (!response.ok) {
+        console.error('Failed to load conversation:', response.statusText)
+        return
+      }
+
+      const data = await response.json()
+      const messages: ChatMessage[] = data.messages.map((msg: { type: string; content: string }, index: number) => ({
+        id: `msg-${threadId}-${index}`,
+        role: msg.type === 'human' ? 'user' : 'assistant',
+        content: msg.content,
+        timestamp: new Date(data.created_at),
+      }))
+
+      set({
+        threadId,
+        messages,
+        streamingContent: '',
+        isProcessing: false,
+      })
+    } catch (error) {
+      console.error('Error loading conversation:', error)
+    }
+  },
 
   startNewConversation: () => {
     const newThreadId = `conversation_${Math.random().toString(36).slice(2, 10)}`
