@@ -114,47 +114,39 @@ async def get_conversation(thread_id: str):
 
                 title, created_at = row
 
-                # Get checkpoint data for messages
-                # Note: Messages are stored in checkpoint channel_values
+                # Get messages from checkpoint_blobs (LangGraph stores them as msgpack)
+                # Get latest messages blob for this thread
                 cur.execute("""
-                    SELECT checkpoint
-                    FROM checkpoints
+                    SELECT blob, type
+                    FROM checkpoint_blobs
                     WHERE thread_id = %s
-                    ORDER BY checkpoint_id DESC
+                      AND channel = 'messages'
+                    ORDER BY version DESC
                     LIMIT 1
                 """, (thread_id,))
 
-                checkpoint_row = cur.fetchone()
+                blob_row = cur.fetchone()
                 messages = []
 
-                if checkpoint_row and checkpoint_row[0]:
-                    # Parse checkpoint to extract messages
-                    # Handles both dict and object message formats
-                    checkpoint = checkpoint_row[0]
-                    if isinstance(checkpoint, dict):
-                        channel_values = checkpoint.get("channel_values", {})
-                        raw_messages = channel_values.get("messages", [])
+                if blob_row and blob_row[0]:
+                    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+                    try:
+                        blob, blob_type = blob_row
+                        serializer = JsonPlusSerializer()
+                        raw_messages = serializer.loads_typed((blob_type, blob))
 
                         for msg in raw_messages:
-                            # Handle dict format (from JSON serialization)
-                            if isinstance(msg, dict):
-                                content = msg.get("content", "")
-                                msg_type = msg.get("type", "unknown")
-                                # Skip tool messages and empty content
-                                if content and msg_type in ("human", "ai"):
-                                    messages.append({
-                                        "type": msg_type,
-                                        "content": content,
-                                    })
-                            # Handle object format (LangChain message objects)
-                            elif hasattr(msg, "content"):
-                                content = msg.content
-                                msg_type = getattr(msg, "type", "unknown")
-                                if content and msg_type in ("human", "ai"):
-                                    messages.append({
-                                        "type": msg_type,
-                                        "content": content,
-                                    })
+                            # LangChain message objects have type and content attributes
+                            msg_type = getattr(msg, "type", None)
+                            content = getattr(msg, "content", "")
+                            # Skip tool messages and empty content
+                            if content and msg_type in ("human", "ai"):
+                                messages.append({
+                                    "type": msg_type,
+                                    "content": content,
+                                })
+                    except Exception as e:
+                        print(f"Error decoding messages: {e}")
 
                 return ConversationDetail(
                     thread_id=thread_id,
