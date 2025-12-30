@@ -26,15 +26,6 @@ export function useWebSocket(): UseWebSocketReturn {
 
   const threadIdRef = useRef<string | null>(null)
 
-  // Chat store actions
-  const {
-    addMessage,
-    setIsProcessing,
-    setStreamingContent,
-    appendStreamingContent,
-    finalizeStreaming,
-  } = useChatStore.getState()
-
   const handleMessage = useCallback((data: AgentEvent) => {
     const chatStore = useChatStore.getState()
     const obsStore = useObservabilityStore.getState()

@@ -119,19 +119,19 @@ export function SearchDetails() {
                   {/* Score badges - show component scores when expanded */}
                   {isExpanded && (
                     <div className="flex flex-wrap gap-2 pt-1">
-                      {hasVectorScore && (
+                      {hasVectorScore && doc.vector_score !== undefined && (
                         <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-blue-500/20 text-blue-400 text-xs">
                           <span className="font-medium">Vector:</span>
                           <span>{(doc.vector_score * 100).toFixed(1)}%</span>
                         </span>
                       )}
-                      {hasTextScore && (
+                      {hasTextScore && doc.text_score !== undefined && (
                         <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-green-500/20 text-green-400 text-xs">
                           <span className="font-medium">Text:</span>
                           <span>{(doc.text_score * 100).toFixed(1)}%</span>
                         </span>
                       )}
-                      {hasRrfScore && (
+                      {hasRrfScore && doc.rrf_score !== undefined && (
                         <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-orange-500/20 text-orange-400 text-xs">
                           <span className="font-medium">RRF:</span>
                           <span>{(doc.rrf_score * 100).toFixed(1)}%</span>

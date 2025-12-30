@@ -16,31 +16,36 @@ import '@xyflow/react/dist/style.css'
 import { useObservabilityStore } from '../../stores/observabilityStore'
 import type { NodeName } from '../../types/events'
 
-// Node definitions
+// Node definitions - organized in vertical hierarchy with separate retry section
 const nodeDefinitions: Record<
   NodeName,
-  { label: string; color: string; x: number; y: number }
+  { label: string; color: string; x: number; y: number; isRetry?: boolean }
 > = {
-  query_evaluator: { label: 'Query Evaluator', color: '#3b82f6', x: 250, y: 0 },
-  agent: { label: 'LLM Agent', color: '#06b6d4', x: 250, y: 100 },
-  tools: { label: 'Knowledge Search', color: '#8b5cf6', x: 450, y: 100 },
-  document_grader: { label: 'Doc Grader', color: '#10b981', x: 450, y: 200 },
-  query_transformer: { label: 'Query Transform', color: '#f59e0b', x: 250, y: 200 },
-  response_grader: { label: 'Response Grader', color: '#ec4899', x: 50, y: 100 },
-  response_improver: { label: 'Response Improver', color: '#f97316', x: 50, y: 200 },
+  // === MAIN FLOW (top to bottom) ===
+  query_evaluator: { label: 'Query Evaluator', color: '#3b82f6', x: 250, y: 0 },       // Entry point
+  agent: { label: 'LLM Agent', color: '#06b6d4', x: 250, y: 100 },                     // Central processor
+  response_grader: { label: 'Response Grader', color: '#ec4899', x: 80, y: 220 },     // Left branch
+  tools: { label: 'Knowledge Search', color: '#8b5cf6', x: 420, y: 220 },              // Right branch
+  document_grader: { label: 'Doc Grader', color: '#10b981', x: 420, y: 340 },          // Below tools
+  // === RETRY SECTION (below separator) ===
+  response_improver: { label: 'Response Improver', color: '#6b7280', x: 120, y: 480, isRetry: true },
+  query_transformer: { label: 'Query Transform', color: '#6b7280', x: 380, y: 480, isRetry: true },
 }
 
-// Edge definitions (flow connections)
-const edgeDefinitions: { source: NodeName; target: NodeName; label?: string }[] = [
+// Edge definitions - organized by flow type
+const edgeDefinitions: { source: NodeName; target: NodeName; label?: string; isRetryEdge?: boolean }[] = [
+  // === MAIN FLOW ===
   { source: 'query_evaluator', target: 'agent' },
-  { source: 'agent', target: 'tools', label: 'tool call' },
-  { source: 'agent', target: 'response_grader', label: 'response' },
+  { source: 'agent', target: 'tools', label: 'search' },
+  { source: 'agent', target: 'response_grader', label: 'respond' },
   { source: 'tools', target: 'document_grader' },
   { source: 'document_grader', target: 'agent', label: 'pass' },
-  { source: 'document_grader', target: 'query_transformer', label: 'fail' },
-  { source: 'query_transformer', target: 'query_evaluator' },
-  { source: 'response_grader', target: 'response_improver', label: 'fail' },
-  { source: 'response_improver', target: 'agent' },
+  // === RETRY EDGES (from graders to retry nodes) ===
+  { source: 'document_grader', target: 'query_transformer', label: 'fail', isRetryEdge: true },
+  { source: 'response_grader', target: 'response_improver', label: 'fail', isRetryEdge: true },
+  // === FEEDBACK EDGES (from retry nodes back to main flow) ===
+  { source: 'query_transformer', target: 'query_evaluator', label: 'retry', isRetryEdge: true },
+  { source: 'response_improver', target: 'agent', label: 'retry', isRetryEdge: true },
 ]
 
 export function AgentGraph() {
@@ -55,18 +60,28 @@ export function AgentGraph() {
 
   // Build nodes with status styling
   const nodes: Node[] = useMemo(() => {
-    return Object.entries(nodeDefinitions).map(([id, def]) => {
+    const nodeList: Node[] = Object.entries(nodeDefinitions).map(([id, def]) => {
       const isVisited = visitedNodes.has(id)
       const isCurrent = currentNode === id
+      const isRetryNode = def.isRetry ?? false
+
+      // Retry nodes have muted colors and dashed borders
+      const bgColor = isVisited
+        ? (isRetryNode ? '#4b5563' : def.color)  // Gray when visited for retry nodes
+        : '#374151'
 
       return {
         id,
         position: { x: def.x, y: def.y },
         data: { label: def.label },
         style: {
-          background: isVisited ? def.color : '#374151',
+          background: bgColor,
           color: '#fff',
-          border: isCurrent ? '3px solid #fff' : '2px solid #4b5563',
+          border: isCurrent
+            ? '3px solid #fff'
+            : isRetryNode
+              ? '2px dashed #6b7280'  // Dashed border for retry nodes
+              : '2px solid #4b5563',
           borderRadius: '8px',
           padding: '10px 16px',
           fontSize: '12px',
@@ -77,6 +92,29 @@ export function AgentGraph() {
         },
       }
     })
+
+    // Add separator line as a special node
+    nodeList.push({
+      id: 'separator',
+      position: { x: 0, y: 410 },
+      data: { label: '── Retry Loops ──' },
+      style: {
+        background: 'transparent',
+        color: '#6b7280',
+        border: 'none',
+        borderRadius: '0',
+        padding: '4px 16px',
+        fontSize: '11px',
+        fontWeight: 400,
+        width: 520,
+        textAlign: 'center' as const,
+        borderTop: '1px dashed #4b5563',
+      },
+      draggable: false,
+      selectable: false,
+    })
+
+    return nodeList
   }, [visitedNodes, currentNode])
 
   // Build edges with visited styling
@@ -85,6 +123,12 @@ export function AgentGraph() {
       const sourceVisited = visitedNodes.has(def.source)
       const targetVisited = visitedNodes.has(def.target)
       const isActive = sourceVisited && targetVisited
+      const isRetryEdge = def.isRetryEdge ?? false
+
+      // Retry edges use dashed lines and muted colors
+      const strokeColor = isActive
+        ? (isRetryEdge ? '#f59e0b' : '#60a5fa')  // Orange for retry, blue for main
+        : '#4b5563'
 
       return {
         id: `e${index}`,
@@ -94,12 +138,13 @@ export function AgentGraph() {
         type: 'smoothstep',
         animated: currentNode === def.source && isExecuting,
         style: {
-          stroke: isActive ? '#60a5fa' : '#4b5563',
+          stroke: strokeColor,
           strokeWidth: isActive ? 2 : 1,
+          strokeDasharray: isRetryEdge ? '5,5' : 'none',  // Dashed for retry edges
           opacity: isActive ? 1 : 0.4,
         },
         labelStyle: {
-          fill: '#9ca3af',
+          fill: isRetryEdge ? '#f59e0b' : '#9ca3af',
           fontSize: 10,
         },
         labelBgStyle: {
@@ -107,7 +152,7 @@ export function AgentGraph() {
         },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: isActive ? '#60a5fa' : '#4b5563',
+          color: strokeColor,
         },
       }
     })

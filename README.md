@@ -147,23 +147,23 @@ flowchart TD
 
 ## Tech Stack
 
-| Category | Technology | Purpose |
-|----------|------------|---------|
-| **LLM** | Ollama + gpt-oss:20b | Local reasoning engine (20B parameters) |
-| **Embeddings** | nomic-embed-text | 768-dimensional semantic vectors |
-| **Reranker** | BAAI/bge-reranker-v2-m3 | Cross-encoder relevance scoring |
-| **Agent Framework** | LangGraph + LangChain | Graph-based state machine orchestration |
-| **Vector Database** | PostgreSQL + PGVector | Semantic search with IVFFlat indexing |
-| **Full-Text Search** | PostgreSQL (tsvector) | Keyword search with GIN indexing |
-| **Memory** | PostgreSQL + langgraph-checkpoint | Persistent conversation state |
-| **Backend API** | FastAPI + WebSocket | REST API with real-time streaming |
-| **Frontend** | React 18 + TypeScript + Tailwind | Modern web UI with Zustand state |
-| **Containerization** | Docker Compose | PostgreSQL orchestration |
+| Category             | Technology                        | Purpose                                 |
+| -------------------- | --------------------------------- | --------------------------------------- |
+| **LLM**              | Ollama + gpt-oss:20b              | Local reasoning engine (20B parameters) |
+| **Embeddings**       | nomic-embed-text                  | 768-dimensional semantic vectors        |
+| **Reranker**         | BAAI/bge-reranker-v2-m3           | Cross-encoder relevance scoring         |
+| **Agent Framework**  | LangGraph + LangChain             | Graph-based state machine orchestration |
+| **Vector Database**  | PostgreSQL + PGVector             | Semantic search with IVFFlat indexing   |
+| **Full-Text Search** | PostgreSQL (tsvector)             | Keyword search with GIN indexing        |
+| **Memory**           | PostgreSQL + langgraph-checkpoint | Persistent conversation state           |
+| **Backend API**      | FastAPI + WebSocket               | REST API with real-time streaming       |
+| **Frontend**         | React 18 + TypeScript + Tailwind  | Modern web UI with Zustand state        |
+| **Containerization** | Docker Compose                    | PostgreSQL orchestration                |
 
 ## Key Techniques
 
 | Technique | Description |
-|-----------|-------------|
+| --- | --- |
 | **Reciprocal Rank Fusion (RRF)** | Combines vector and full-text search rankings: `score = Σ 1/(rank + k)` where k=60 |
 | **Cross-Encoder Reranking** | BGE model directly scores query-document relevance (0.0-1.0) |
 | **Adaptive Lambda** | Dynamically adjusts vector vs. lexical weight based on query type |
@@ -219,6 +219,7 @@ python ingest_langchain_docs.py --stats
 ```
 
 This ingests **~2,000 documents** from:
+
 - **LangChain** - Core framework documentation
 - **LangGraph** - Graph-based agent orchestration
 - **LangSmith** - Observability and tracing platform
@@ -241,6 +242,7 @@ This ingests **~2,000 documents** from:
 ## Example Queries
 
 With LangChain documentation knowledge base:
+
 ```text
 You: What is LangGraph?
 [Reranker] Reranking 15 candidates → top 4 selected
@@ -251,6 +253,7 @@ Agent (response): To create a ReAct agent, you can use create_react_agent()...
 ```
 
 With sample documents:
+
 ```text
 You: What is Python programming?
 Agent (response): Python is a high-level programming language...

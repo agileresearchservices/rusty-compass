@@ -9,7 +9,7 @@ import { StepCard } from './StepCard'
 export function StepsList() {
   const { steps } = useObservabilityStore()
   const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true)
+  const [isAutoScrollEnabled] = useState(true)
   const [isNearBottom, setIsNearBottom] = useState(true)
 
   // Auto-scroll to bottom when new steps arrive

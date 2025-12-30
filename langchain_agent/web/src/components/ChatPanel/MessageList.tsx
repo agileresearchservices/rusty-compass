@@ -29,21 +29,21 @@ export function MessageList() {
   // Get a brief summary of the current step
   const getCurrentStepSummary = (): string | null => {
     if (!currentNode || !steps.length) return null
-    const currentStep = steps.find(s => s.label === currentNode)
+    const currentStep = steps.find(s => s.node === currentNode)
     if (!currentStep || !currentStep.events.length) return null
 
     // Get the most recent event for this step
     const latestEvent = currentStep.events[currentStep.events.length - 1]
 
     // Extract summary based on event type
-    if (latestEvent?.data?.document_count !== undefined) {
-      return `Found ${latestEvent.data.document_count} candidates`
+    if (latestEvent.type === 'hybrid_search_result') {
+      return `Found ${latestEvent.candidate_count} candidates`
     }
-    if (latestEvent?.data?.relevant_count !== undefined) {
-      return `${latestEvent.data.relevant_count}/${latestEvent.data.total_count} relevant`
+    if (latestEvent.type === 'document_grading_summary') {
+      return `${latestEvent.relevant_count}/${latestEvent.total_count} relevant`
     }
-    if (latestEvent?.data?.score !== undefined) {
-      return `Score: ${(latestEvent.data.score * 100).toFixed(0)}%`
+    if (latestEvent.type === 'response_grading') {
+      return `Score: ${(latestEvent.score * 100).toFixed(0)}%`
     }
 
     return null

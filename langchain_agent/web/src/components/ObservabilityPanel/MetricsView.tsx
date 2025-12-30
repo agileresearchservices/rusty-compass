@@ -7,7 +7,7 @@ import { Clock, Zap, FileSearch, Brain, CheckSquare, Layers, Radio, RotateCw } f
 import clsx from 'clsx'
 
 export function MetricsView() {
-  const { metrics, steps, isExecuting, queryEvaluation, documentGradingSummary, responseGrading } = useObservabilityStore()
+  const { metrics, steps, isExecuting, queryEvaluation, documentGradingSummary } = useObservabilityStore()
 
   if (!metrics && steps.length === 0) {
     return (

@@ -86,6 +86,11 @@ export interface RerankedDocument {
   original_rank: number
   snippet: string
   rank_change: number
+  // Optional component scores (may be included from hybrid search)
+  vector_score?: number
+  text_score?: number
+  rrf_score?: number
+  page_content?: string
 }
 
 export interface RerankerResultEvent extends BaseEvent {
