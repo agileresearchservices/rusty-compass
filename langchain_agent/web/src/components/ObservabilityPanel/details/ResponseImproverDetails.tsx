@@ -19,10 +19,16 @@ export function ResponseImproverDetails({ step }: ResponseImproverDetailsProps) 
     (e) => e.type === 'response_improvement'
   ) as ResponseImprovementEvent[]
 
-  // Find the most recent response_grading event to get the previous score/reasoning
-  // Look through all steps in reverse order to find the last response_grading event
+  // Find the response_grading event that TRIGGERED this improvement
+  // Look for the most recent grading event that FAILED (grade !== 'pass')
+  // This is the one that caused this response_improver to fire
   let previousGradingEvent: ResponseGradingEvent | null = null
-  for (let i = steps.length - 1; i >= 0; i--) {
+
+  // Find the index of this response_improver step
+  const currentStepIndex = steps.findIndex(s => s === step)
+
+  // Look backwards from this step to find the grading event that triggered it
+  for (let i = currentStepIndex - 1; i >= 0; i--) {
     const gradingEvent = steps[i].events.find(
       (e) => e.type === 'response_grading'
     ) as ResponseGradingEvent | undefined
@@ -43,12 +49,17 @@ export function ResponseImproverDetails({ step }: ResponseImproverDetailsProps) 
   const latestImprovement = improvementEvents[improvementEvents.length - 1]
   const { feedback, retry_count } = latestImprovement
 
+  // Fallback: if feedback is empty, construct it from the previous grading event's reasoning
+  const displayFeedback = feedback || (previousGradingEvent
+    ? `[Response needs improvement] ${previousGradingEvent.reasoning}. Please provide a complete, well-structured response.`
+    : 'Response did not meet quality criteria.')
+
   return (
     <div className="space-y-4">
       {/* Retry count indicator */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/20">
-          <RefreshCw className="w-5 h-5 text-blue-400 animate-spin" />
+          <RefreshCw className={clsx('w-5 h-5 text-blue-400', step.status === 'running' && 'animate-spin')} />
           <span className="font-medium text-blue-400">
             Retry Attempt {retry_count}
           </span>
@@ -66,7 +77,7 @@ export function ResponseImproverDetails({ step }: ResponseImproverDetailsProps) 
         <span className="text-xs text-gray-500">Improvement Feedback:</span>
         <div className="bg-gray-800/50 rounded p-3 border border-blue-500/30">
           <p className="text-sm text-gray-300 leading-relaxed max-h-32 overflow-y-auto">
-            {feedback}
+            {displayFeedback}
           </p>
         </div>
       </div>

@@ -826,84 +826,50 @@ class LangChainAgent:
 
         print(f"\n[Query Evaluator] Starting evaluation for query: '{last_user_msg[:80]}...'")
 
-        # OPTIMIZATION: Try fast-path heuristics before expensive LLM evaluation
-        import re
-        query_lower = last_user_msg.lower().strip()
-
-        # Pattern 1: Pure semantic queries (what is, explain, describe)
-        if any(query_lower.startswith(p) for p in ["what is", "explain", "describe", "tell me about", "how does"]):
-            print(f"[Query Evaluator] ⚡ Fast-path: Pure Semantic (natural language question)")
-            elapsed = time.time() - start_time
-            print(f"  Evaluation time: {elapsed:.3f}s (skipped LLM, used heuristic)")
-            return {
-                "lambda_mult": 0.90,
-                "query_analysis": "Fast-path: Natural language question → Pure semantic search",
-                "optimized_query": last_user_msg
-            }
-
-        # Pattern 2: Lexical queries (dates, versions, model numbers, codes)
-        if re.search(r'\b\d{4}\b', query_lower) or re.search(r'v?\d+\.\d+(\.\d+)?', query_lower) or re.search(r'[A-Z]{2,}-\d+', query_lower):
-            print(f"[Query Evaluator] ⚡ Fast-path: Pure Lexical (numbers/versions/identifiers)")
-            elapsed = time.time() - start_time
-            print(f"  Evaluation time: {elapsed:.3f}s (skipped LLM, used heuristic)")
-            return {
-                "lambda_mult": 0.10,
-                "query_analysis": "Fast-path: Technical identifiers → Pure lexical search",
-                "optimized_query": query_lower
-            }
-
-        # Pattern 2b: Error messages and exceptions (need keyword matching)
-        error_keywords = ["error", "exception", "failed", "cannot", "unable", "traceback", "importerror", "typeerror", "valueerror", "keyerror", "attributeerror", "modulenotfounderror"]
-        if any(kw in query_lower for kw in error_keywords):
-            print(f"[Query Evaluator] ⚡ Fast-path: Lexical-Heavy (error message/exception)")
-            elapsed = time.time() - start_time
-            print(f"  Evaluation time: {elapsed:.3f}s (skipped LLM, used heuristic)")
-            return {
-                "lambda_mult": 0.25,
-                "query_analysis": "Fast-path: Error message → Lexical-heavy search",
-                "optimized_query": last_user_msg  # Preserve exact error text
-            }
-
-        # Pattern 2c: CamelCase class/function names (specific identifiers need keyword matching)
-        if re.search(r'\b[A-Z][a-z]+[A-Z][a-zA-Z]*\b', last_user_msg):  # CamelCase pattern
-            print(f"[Query Evaluator] ⚡ Fast-path: Lexical-Heavy (CamelCase identifier)")
-            elapsed = time.time() - start_time
-            print(f"  Evaluation time: {elapsed:.3f}s (skipped LLM, used heuristic)")
-            return {
-                "lambda_mult": 0.30,
-                "query_analysis": "Fast-path: Class/function name → Lexical-heavy search",
-                "optimized_query": last_user_msg  # Preserve exact class name
-            }
-
-        # Pattern 3: Balanced queries (how to, tutorial, guide, example, tips)
-        if any(word in query_lower for word in ["how to", "tutorial", "guide", "example", "tips", "best practices", "template"]):
-            print(f"[Query Evaluator] ⚡ Fast-path: Balanced (practical how-to query)")
-            elapsed = time.time() - start_time
-            print(f"  Evaluation time: {elapsed:.3f}s (skipped LLM, used heuristic)")
-            return {
-                "lambda_mult": 0.50,
-                "query_analysis": "Fast-path: How-to question → Balanced hybrid search",
-                "optimized_query": last_user_msg
-            }
-
-        # LLM evaluation prompt (for queries that don't match heuristics)
-        evaluation_prompt = f"""Analyze this search query and determine the optimal search strategy AND optimized query.
+        # LLM-based query evaluation with few-shot examples
+        evaluation_prompt = f"""Analyze this search query and determine the optimal search strategy.
 
 Query: "{last_user_msg}"
 
-Lambda_mult Guidelines (0.0=lexical, 1.0=semantic):
-- 0.0-0.2: Pure LEXICAL - Extract exact terms, preserve identifiers
-- 0.2-0.4: LEXICAL-heavy - Preserve key terms, add keywords
-- 0.4-0.6: BALANCED - Balance keywords and natural language
-- 0.6-0.8: SEMANTIC-heavy - Preserve natural language, clarify intent
-- 0.8-1.0: Pure SEMANTIC - PRESERVE NATURAL LANGUAGE (minimal changes)
+=== EXAMPLES ===
+Query: "LangChain 0.3.0 release notes"
+Output: {{"lambda_mult": 0.15, "reasoning": "Version number requires exact lexical match", "optimized_query": "LangChain 0.3.0 release notes changelog"}}
 
-CRITICAL RULES:
+Query: "LANGCHAIN_API_KEY environment variable"
+Output: {{"lambda_mult": 0.1, "reasoning": "Exact identifier - pure lexical", "optimized_query": "LANGCHAIN_API_KEY environment variable configuration"}}
+
+Query: "BaseChatModel class signature"
+Output: {{"lambda_mult": 0.2, "reasoning": "CamelCase class name - lexical match needed", "optimized_query": "BaseChatModel class signature parameters"}}
+
+Query: "LangGraph checkpointer setup"
+Output: {{"lambda_mult": 0.35, "reasoning": "Specific feature but needs context", "optimized_query": "LangGraph checkpointer setup configuration"}}
+
+Query: "LangGraph state management patterns"
+Output: {{"lambda_mult": 0.5, "reasoning": "Framework patterns - balanced approach", "optimized_query": "LangGraph state management patterns best practices"}}
+
+Query: "How to build multi-agent systems with LangGraph"
+Output: {{"lambda_mult": 0.75, "reasoning": "Architectural how-to - semantic understanding needed", "optimized_query": "build multi-agent systems LangGraph architecture"}}
+
+Query: "What is LangGraph?"
+Output: {{"lambda_mult": 0.9, "reasoning": "Conceptual question - pure semantic", "optimized_query": "What is LangGraph?"}}
+
+Query: "Explain how LangChain agents work"
+Output: {{"lambda_mult": 0.85, "reasoning": "Educational explanation - semantic understanding", "optimized_query": "Explain how LangChain agents work"}}
+
+=== CLASSIFICATION GUIDE ===
+Lambda_mult (0.0=lexical, 1.0=semantic):
+- 0.0-0.2: LEXICAL - Version numbers, error messages, class names, environment variables
+- 0.2-0.4: LEXICAL-HEAVY - API methods, specific parameters, module paths
+- 0.4-0.6: BALANCED - Feature tutorials, configuration guides, framework patterns
+- 0.6-0.8: SEMANTIC-HEAVY - How-to architecture questions, optimization techniques
+- 0.8-1.0: SEMANTIC - "What is", "Explain", conceptual questions
+
+CRITICAL: "Specific" does NOT mean "semantic". Version numbers and identifiers are SPECIFIC but need LEXICAL (low lambda) matching.
+
+=== OPTIMIZATION RULES ===
 1. lambda >= 0.8: Keep query nearly identical
-2. lambda >= 0.6: Keep most natural language
-3. lambda <= 0.4: Optimize for keywords
-4. lambda <= 0.2: Heavy keyword extraction
-5. ALWAYS maintain user intent
+2. lambda <= 0.4: Optimize for keywords
+3. ALWAYS maintain user intent
 
 Respond with ONLY JSON:
 {{"lambda_mult": <0.0-1.0>, "reasoning": "<brief explanation>", "optimized_query": "<optimized query>"}}
@@ -1877,22 +1843,29 @@ Guidelines:
 USER QUERY: {query}
 
 RESPONSE:
-{response[:1000]}
+{response}
 
 Evaluate on these criteria:
 1. RELEVANCE: Does the response directly address the query?
-2. COMPLETENESS: Does it provide a thorough answer?
-3. CLARITY: Is the response well-structured and easy to understand?
+2. COMPLETENESS: Does it provide a thorough, actionable answer?
+3. STRUCTURE: Is the response well-organized with clear sections/headings?
+4. SPECIFICITY: Does it include specific details, examples, or code when appropriate?
 
 Respond with JSON only:
 {{"grade": "pass", "score": 0.85, "reasoning": "brief explanation"}}
 
-Guidelines:
-- grade: "pass" if response reasonably answers the query, "fail" if clearly wrong/irrelevant/incomplete
-- score: 0.0-1.0 indicating quality
-- reasoning: one sentence explanation
+FAIL the response if ANY of these apply:
+- Response is vague or generic without specific details
+- Missing code examples when the query asks "how to" do something technical
+- Lacks clear structure (no headings, bullet points, or logical organization)
+- Incomplete answer that doesn't fully address the query
+- Contains placeholder text or incomplete sections
 
-Only FAIL responses that are clearly wrong, irrelevant, or too incomplete to be useful."""
+Guidelines:
+- grade: "pass" only if response is complete, specific, and well-structured
+- grade: "fail" if response needs improvement in any major area
+- score: 0.0-1.0 indicating quality (be critical - 0.7 is average, not good)
+- reasoning: one sentence explaining what's good or what needs improvement"""
 
         try:
             result = self.llm.invoke(prompt)

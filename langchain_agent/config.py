@@ -272,7 +272,7 @@ ENABLE_RESPONSE_GRADING = True      # Evaluate final response quality
 ENABLE_QUERY_TRANSFORMATION = True  # Rewrite query if documents are poor
 
 # Maximum number of retrieval iterations (1 = no retries, 2 = one retry)
-REFLECTION_MAX_ITERATIONS = 1
+REFLECTION_MAX_ITERATIONS = 2
 
 # Minimum number of relevant documents required to pass grading
 REFLECTION_MIN_RELEVANT_DOCS = 1

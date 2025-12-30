@@ -345,7 +345,9 @@ flowchart LR
 ### Processing Steps
 
 1. **User Query** → Agent receives input
-2. **Query Evaluation** → LLM classifies query type, sets lambda (vector vs. lexical weight)
+2. **Query Evaluation** → LLM classifies query type using few-shot examples, sets lambda (vector vs. lexical weight)
+   - Uses 8 few-shot examples covering lexical (versions, errors) to semantic (conceptual questions)
+   - Key insight: "Specific" ≠ "Semantic" - version numbers need lexical search despite being specific
 3. **ReAct Reasoning** → LLM decides if retrieval is needed
 4. **Hybrid Search** → PostgreSQL with PGVector performs combined search:
    - Vector search: Semantic similarity (768-dim embeddings)
@@ -452,11 +454,12 @@ The agent includes a reflection loop that grades retrieved documents and respons
 
 - **ENABLE_REFLECTION**: Master switch for reflection loop (default: `True`)
 - **ENABLE_DOCUMENT_GRADING**: Grade retrieved documents for relevance (default: `True`)
-- **ENABLE_RESPONSE_GRADING**: Evaluate final response quality (default: `True`)
+- **ENABLE_RESPONSE_GRADING**: Evaluate final response quality with strict criteria (default: `True`)
+  - Fails responses that are vague, missing code examples, lack structure, or are incomplete
 - **ENABLE_QUERY_TRANSFORMATION**: Rewrite query if documents are poor (default: `True`)
-- **REFLECTION_MAX_ITERATIONS**: Maximum retrieval attempts (default: `2`)
-- **REFLECTION_MIN_RELEVANT_DOCS**: Minimum relevant docs to pass grading (default: `2`)
-- **REFLECTION_DOC_SCORE_THRESHOLD**: Minimum average relevance score (default: `0.5`)
+- **REFLECTION_MAX_ITERATIONS**: Maximum retrieval/response attempts (default: `2`, allows 1 retry)
+- **REFLECTION_MIN_RELEVANT_DOCS**: Minimum relevant docs to pass grading (default: `1`)
+- **REFLECTION_DOC_SCORE_THRESHOLD**: Minimum average relevance score (default: `0.3`)
 - **REFLECTION_SHOW_STATUS**: Display reflection status in output (default: `True`)
 
 **How It Works:**
