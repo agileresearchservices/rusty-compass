@@ -151,8 +151,8 @@ VECTOR_COLLECTION_NAME = "langchain_docs"
 RETRIEVER_K = 4
 
 # Number of documents to fetch before filtering (for hybrid search)
-# Increased to 30 to provide more candidates for reranking
-RETRIEVER_FETCH_K = 30
+# Increased to 40 to provide more diverse candidates for reranking
+RETRIEVER_FETCH_K = 40
 
 # Lambda multiplier for hybrid search (0.0 = pure lexical, 1.0 = pure semantic/dense)
 RETRIEVER_LAMBDA_MULT = 0.25
@@ -175,7 +175,7 @@ ENABLE_RERANKING = True
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
 # Number of candidates to fetch before reranking
-RERANKER_FETCH_K = 15
+RERANKER_FETCH_K = 25
 
 # Final number of documents to return after reranking
 RERANKER_TOP_K = 4

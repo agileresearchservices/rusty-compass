@@ -410,7 +410,7 @@ Edit `config.py` to customize:
 
 ### Retriever Configuration
 - **RETRIEVER_K**: Number of documents to retrieve per query (default: 4)
-- **RETRIEVER_FETCH_K**: Number of documents to fetch before filtering (default: 20)
+- **RETRIEVER_FETCH_K**: Number of documents to fetch before filtering (default: 40)
 - **RETRIEVER_LAMBDA_MULT**: Hybrid search weight for vector vs keyword search (default: 0.25)
   - 0.0 = pure lexical/full-text search
   - 0.25 = 75% lexical + 25% semantic (default)
@@ -426,11 +426,11 @@ The agent uses a cross-encoder model to rerank hybrid search results for improve
   - Alternatives:
     - `"BAAI/bge-reranker-v2-m3"` - Fast, compact (~2.3GB), recommended (default)
     - `"BAAI/bge-reranker-v2-large"` - Better accuracy, larger model (~1.2GB)
-- **RERANKER_FETCH_K**: Number of candidates to fetch before reranking (default: 15)
+- **RERANKER_FETCH_K**: Number of candidates to fetch before reranking (default: 25)
 - **RERANKER_TOP_K**: Final number of documents after reranking (default: 4)
 
 **How It Works:**
-1. Hybrid search retrieves 15 candidate documents using combined vector + lexical search
+1. Hybrid search retrieves 25 candidate documents using combined vector + lexical search
 2. Reranker scores each document's relevance to the query (0.0-1.0)
 3. Top 4 highest-scoring documents are selected
 4. Final 4 documents sent to LLM for response generation
@@ -513,6 +513,25 @@ flowchart TD
 [Reflection] Response failed grading. Retry 1/2
 [Response Grader] ✓ PASS (score: 0.90)
   The response accurately defines the concept and is well-structured.
+```
+
+**Anti-Hallucination Protection:**
+
+When no relevant documents are found in the knowledge base, the Response Grader includes special handling to prevent hallucination:
+
+1. **Context-Aware Grading**: The grader receives document grading results and knows when no relevant docs exist
+2. **Hallucination Detection**: Responses that fabricate information when no documents support it are marked as FAIL
+3. **Honest Response Pass**: Responses that honestly acknowledge "I couldn't find that information" automatically pass
+4. **Corrective Feedback**: If the LLM initially hallucinates, the Response Improver instructs it to acknowledge the lack of information
+
+Example:
+```
+[Document Grader] ✗ 0/4 documents relevant (avg score: 0.12)
+[Response Grader] ✗ FAIL (score: 0.30)
+  The assistant provides detailed information not supported by any retrieved documents (hallucination).
+[Response Improver] Feedback: Acknowledge the lack of information rather than present fabricated details.
+[Response Grader] ✓ PASS (score: 0.90)
+  The response honestly acknowledges the information is not available.
 ```
 
 **Performance Impact:**

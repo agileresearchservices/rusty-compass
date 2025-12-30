@@ -1681,6 +1681,38 @@ Respond with ONLY the rewritten query, nothing else."""
         # Get document context
         doc_summary = state.get("document_grade_summary", {})
 
+        # SAFEGUARD: If no relevant documents found and response honestly acknowledges this,
+        # auto-pass to prevent hallucination from Response Improver
+        relevant_count = doc_summary.get("relevant_count", 0)
+        no_relevant_docs = relevant_count == 0 or doc_summary.get("grade") == "fail"
+
+        # Check if response honestly acknowledges missing information
+        honest_acknowledgment_phrases = [
+            "didn't return any matching documents",
+            "couldn't find",
+            "no relevant documents",
+            "not found in",
+            "isn't stored in",
+            "not in the knowledge base",
+            "no matching documents",
+            "information is not available",
+            "don't have that information",
+        ]
+        response_lower = last_response.lower()
+        acknowledges_missing = any(phrase in response_lower for phrase in honest_acknowledgment_phrases)
+
+        if no_relevant_docs and acknowledges_missing:
+            print(f"\n[Response Grader] ✓ Auto-PASS: Response honestly acknowledges missing information")
+            print(f"  (No relevant documents found, honest response prevents hallucination)")
+            elapsed = time.time() - start_time
+            return {
+                "response_grade": {
+                    "grade": "pass",
+                    "score": 0.75,
+                    "reasoning": "Auto-pass: Response honestly acknowledges information is not in knowledge base (prevents hallucination)"
+                }
+            }
+
         # Show response preview and context
         response_preview = last_response[:150].replace("\n", " ") + "..." if len(last_response) > 150 else last_response
         print(f"  Response: {response_preview}")
@@ -1838,10 +1870,30 @@ Guidelines:
 
     def _grade_response(self, query: str, response: str, doc_context: dict) -> ReflectionResult:
         """Grade the quality of the final response using LLM."""
+
+        # Extract document grading context
+        relevant_count = doc_context.get("relevant_count", 0)
+        total_count = doc_context.get("total_count", 0)
+        doc_grade = doc_context.get("grade", "unknown")
+        no_relevant_docs = relevant_count == 0 or doc_grade == "fail"
+
+        # Build context-aware prompt
+        doc_context_str = ""
+        if no_relevant_docs:
+            doc_context_str = f"""
+IMPORTANT CONTEXT - NO RELEVANT DOCUMENTS FOUND:
+The knowledge base search returned {total_count} documents, but {relevant_count} were relevant to the query.
+This means the information requested is NOT in the knowledge base.
+
+CRITICAL: When no relevant documents exist, an honest response acknowledging this is CORRECT.
+DO NOT penalize responses that honestly state "I couldn't find that information" or similar.
+Such responses should PASS because they are truthful and avoid hallucination.
+"""
+
         prompt = f"""Evaluate the quality of this response to the user's query.
 
 USER QUERY: {query}
-
+{doc_context_str}
 RESPONSE:
 {response}
 
@@ -1850,20 +1902,27 @@ Evaluate on these criteria:
 2. COMPLETENESS: Does it provide a thorough, actionable answer?
 3. STRUCTURE: Is the response well-organized with clear sections/headings?
 4. SPECIFICITY: Does it include specific details, examples, or code when appropriate?
+5. HONESTY: Does it avoid making up information not supported by documents?
 
 Respond with JSON only:
 {{"grade": "pass", "score": 0.85, "reasoning": "brief explanation"}}
 
 FAIL the response if ANY of these apply:
-- Response is vague or generic without specific details
-- Missing code examples when the query asks "how to" do something technical
+- Response is vague or generic without specific details (UNLESS no relevant docs exist)
+- Missing code examples when the query asks "how to" do something technical (UNLESS no docs exist)
 - Lacks clear structure (no headings, bullet points, or logical organization)
-- Incomplete answer that doesn't fully address the query
+- Incomplete answer that doesn't fully address the query (UNLESS information is unavailable)
 - Contains placeholder text or incomplete sections
+- MAKES UP OR HALLUCINATES information not found in the knowledge base
+
+PASS the response if:
+- No relevant documents exist AND the response honestly acknowledges this
+- The response correctly states the information is not available
+- The response offers to help in alternative ways (e.g., suggest external resources)
 
 Guidelines:
-- grade: "pass" only if response is complete, specific, and well-structured
-- grade: "fail" if response needs improvement in any major area
+- grade: "pass" only if response is complete, specific, and well-structured OR honestly acknowledges missing data
+- grade: "fail" if response needs improvement OR contains hallucinated content
 - score: 0.0-1.0 indicating quality (be critical - 0.7 is average, not good)
 - reasoning: one sentence explaining what's good or what needs improvement"""
 
