@@ -99,30 +99,37 @@ export function useWebSocket(): UseWebSocketReturn {
   const connect = useCallback((threadId: string) => {
     // If already connected to this thread, do nothing
     if (wsInstance?.readyState === WebSocket.OPEN && currentThreadId === threadId) {
+      console.log('Already connected to this thread, skipping')
       return
     }
 
+    console.log('Starting new WebSocket connection for thread:', threadId)
+
     // Close existing connection if any
     if (wsInstance) {
+      console.log('Closing previous WebSocket connection')
       wsInstance.close()
       wsInstance = null
     }
 
+    // Set connecting state
     setConnectionState(false, true, null)
     threadIdRef.current = threadId
     currentThreadId = threadId
 
-    // Build WebSocket URL
+    // Build WebSocket URL - connect to backend on port 8000
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.host
-    const url = `${protocol}//${host}/ws/chat?thread_id=${threadId}`
+    const url = `${protocol}//localhost:8000/ws/chat?thread_id=${threadId}`
 
     console.log('Connecting to WebSocket:', url)
     const ws = new WebSocket(url)
 
     ws.onopen = () => {
+      console.log('WebSocket onopen event fired')
       setConnectionState(true, false, null)
-      console.log('WebSocket connected')
+      // Also update Zustand chat store to ensure state consistency
+      useChatStore.getState().setConnectionState(true, false, null)
+      console.log('WebSocket connected - state updated')
     }
 
     ws.onmessage = (event) => {
@@ -140,8 +147,12 @@ export function useWebSocket(): UseWebSocketReturn {
     }
 
     ws.onclose = () => {
-      setConnectionState(false, false, null)
-      wsInstance = null
+      // Only update state if this is still the current WebSocket instance
+      // This prevents stale onclose handlers from overwriting state when switching conversations
+      if (wsInstance === ws) {
+        setConnectionState(false, false, null)
+        wsInstance = null
+      }
       console.log('WebSocket disconnected')
     }
 

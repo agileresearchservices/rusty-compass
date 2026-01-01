@@ -65,6 +65,11 @@ export function AgentGraph() {
       const isCurrent = currentNode === id
       const isRetryNode = def.isRetry ?? false
 
+      // Determine node state for accessibility
+      let state = 'pending'
+      if (isCurrent) state = 'current'
+      else if (isVisited) state = 'visited'
+
       // Retry nodes have muted colors and dashed borders
       const bgColor = isVisited
         ? (isRetryNode ? '#4b5563' : def.color)  // Gray when visited for retry nodes
@@ -73,7 +78,11 @@ export function AgentGraph() {
       return {
         id,
         position: { x: def.x, y: def.y },
-        data: { label: def.label },
+        data: {
+          label: def.label,
+          // Accessibility label for screen readers
+          ariaLabel: `${def.label}, ${state}${isRetryNode ? ', retry node' : ''}`
+        },
         style: {
           background: bgColor,
           color: '#fff',
@@ -163,7 +172,7 @@ export function AgentGraph() {
   }, [])
 
   return (
-    <div className="h-full w-full">
+    <div className="h-full w-full relative">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -182,6 +191,7 @@ export function AgentGraph() {
         <Controls
           showInteractive={false}
           className="!bg-gray-800 !border-gray-700 !rounded-lg"
+          aria-label="Graph controls: use keyboard or mouse to pan and zoom"
         />
         <Background
           variant={BackgroundVariant.Dots}
@@ -192,19 +202,33 @@ export function AgentGraph() {
       </ReactFlow>
 
       {/* Legend */}
-      <div className="absolute bottom-4 right-4 bg-gray-800/90 rounded-lg p-3 text-xs">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-3 h-3 rounded bg-blue-500" />
-          <span className="text-gray-400">Visited</span>
-        </div>
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-3 h-3 rounded bg-gray-600 border-2 border-white" />
-          <span className="text-gray-400">Current</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded bg-gray-600 opacity-50" />
-          <span className="text-gray-400">Pending</span>
-        </div>
+      <div
+        className="absolute bottom-4 right-4 bg-gray-800/90 rounded-lg p-3 text-xs"
+        aria-label="Agent workflow legend"
+      >
+        <h3 className="font-semibold text-gray-300 mb-2 text-xs">Workflow Status</h3>
+        <dl className="space-y-2">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded bg-blue-500" aria-hidden="true" />
+            <dt className="text-gray-400">Visited:</dt>
+            <dd className="sr-only">Node has been executed</dd>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded bg-gray-600 border-2 border-white" aria-hidden="true" />
+            <dt className="text-gray-400">Current:</dt>
+            <dd className="sr-only">Node is currently executing</dd>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded bg-gray-600 opacity-50" aria-hidden="true" />
+            <dt className="text-gray-400">Pending:</dt>
+            <dd className="sr-only">Node has not been executed yet</dd>
+          </div>
+        </dl>
+      </div>
+
+      {/* Accessibility announcement */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {currentNode ? `Currently executing: ${nodeDefinitions[currentNode as NodeName]?.label || currentNode}` : 'Waiting for query...'}
       </div>
     </div>
   )

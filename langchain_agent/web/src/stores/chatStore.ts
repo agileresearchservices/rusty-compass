@@ -151,13 +151,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   loadConversation: async (threadId) => {
     try {
-      const response = await fetch(`/api/conversations/${threadId}`)
+      // Always set the threadId first so connection can be attempted
+      set({ threadId, connectionError: null })
+
+      console.log('Loading conversation:', threadId)
+      const response = await fetch(`http://localhost:8000/api/conversations/${threadId}`)
+
+      console.log('Conversation API response:', response.status, response.statusText)
+
       if (!response.ok) {
-        console.error('Failed to load conversation:', response.statusText)
+        const errorText = await response.text()
+        console.error('Failed to load conversation:', response.status, response.statusText, errorText)
+        // Still allow connection even if message history fails to load
+        set({
+          messages: [],
+          streamingContent: '',
+          isProcessing: false,
+        })
         return
       }
 
       const data = await response.json()
+      console.log('Conversation data loaded:', data)
+
       const messages: ChatMessage[] = data.messages.map((msg: { type: string; content: string }, index: number) => ({
         id: `msg-${threadId}-${index}`,
         role: msg.type === 'human' ? 'user' : 'assistant',
@@ -166,13 +182,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }))
 
       set({
-        threadId,
         messages,
         streamingContent: '',
         isProcessing: false,
+        connectionError: null,
       })
     } catch (error) {
       console.error('Error loading conversation:', error)
+      // Still set threadId so connection attempt can proceed
+      set({
+        threadId,
+        messages: [],
+        streamingContent: '',
+        isProcessing: false,
+      })
     }
   },
 

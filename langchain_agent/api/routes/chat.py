@@ -157,12 +157,47 @@ async def websocket_chat(websocket: WebSocket):
     # Accept connection
     await manager.connect(websocket, thread_id)
 
+    # Load existing message count from checkpoint
+    existing_count = 0
+    try:
+        pool = manager.agent_service._agent.pool if manager.agent_service and manager.agent_service._agent else None
+
+        if pool:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    # Query checkpoint_blobs for existing messages
+                    await cur.execute("""
+                        SELECT blob, type
+                        FROM checkpoint_blobs
+                        WHERE thread_id = %s
+                          AND channel = 'messages'
+                        ORDER BY version DESC
+                        LIMIT 1
+                    """, (thread_id,))
+
+                    blob_row = await cur.fetchone()
+
+                    if blob_row and blob_row[0]:
+                        from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+                        blob, blob_type = blob_row
+                        serializer = JsonPlusSerializer()
+                        raw_messages = serializer.loads_typed((blob_type, blob))
+
+                        # Count human and AI messages with content
+                        existing_count = sum(
+                            1 for msg in raw_messages
+                            if hasattr(msg, 'type') and msg.type in ('human', 'ai')
+                            and hasattr(msg, 'content') and msg.content
+                        )
+    except Exception as e:
+        print(f"Error loading existing messages count: {e}")
+
     # Send connection established event
     await manager.emit_event(
         thread_id,
         ConnectionEstablished(
             thread_id=thread_id,
-            existing_messages=0,  # TODO: Load from checkpoint
+            existing_messages=existing_count,
         )
     )
 

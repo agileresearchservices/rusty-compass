@@ -87,16 +87,16 @@ export function MessageList() {
   }
 
   return (
-    <div className="h-full overflow-y-auto px-4 py-4 space-y-4">
+    <div className="h-full overflow-y-auto px-4 py-4 space-y-4" role="log" aria-live="polite" aria-label="Chat messages">
       {displayMessages.map((message) => (
         <Message key={message.id} message={message} />
       ))}
 
       {/* Show typing indicator when processing but no streaming content yet */}
       {isProcessing && !streamingContent && messages[messages.length - 1]?.role !== 'assistant' && (
-        <div className="flex items-center gap-2 text-gray-500">
+        <div className="flex items-center gap-2 text-gray-500" aria-live="polite" aria-label="Agent processing">
           <div className="flex gap-1">
-            <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
+            <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" aria-hidden="true" />
           </div>
           <div className="text-sm">
             {currentNode ? (
@@ -105,7 +105,7 @@ export function MessageList() {
                   {getNodeDisplayName(currentNode)}
                 </span>
                 {getCurrentStepSummary() && (
-                  <span className="text-gray-600">• {getCurrentStepSummary()}</span>
+                  <span className="text-gray-400">• {getCurrentStepSummary()}</span>
                 )}
               </span>
             ) : (

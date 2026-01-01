@@ -34,7 +34,7 @@ export function ObservabilityPanel() {
         </div>
 
         {/* Tab buttons */}
-        <div className="flex gap-1 bg-gray-800 rounded-lg p-1">
+        <div className="flex gap-1 bg-gray-800 rounded-lg p-1" role="tablist" aria-label="Observability panel tabs">
           {tabs.map((tab) => {
             const Icon = tab.icon
             const isActive = activeTab === tab.id
@@ -42,8 +42,11 @@ export function ObservabilityPanel() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
+                role="tab"
+                aria-selected={isActive}
+                aria-controls={`${tab.id}-panel`}
                 className={clsx(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors',
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500',
                   isActive
                     ? 'bg-gray-700 text-white'
                     : 'text-gray-400 hover:text-gray-200'
@@ -58,18 +61,26 @@ export function ObservabilityPanel() {
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-hidden relative" style={{ minHeight: '400px' }}>
-        {activeTab === 'steps' && <StepsList />}
+      <div className="flex-1 overflow-hidden relative">
+        {activeTab === 'steps' && (
+          <div id="steps-panel" role="tabpanel" className="h-full overflow-hidden">
+            <StepsList />
+          </div>
+        )}
         {activeTab === 'graph' && (
-          <div className="absolute inset-0">
+          <div id="graph-panel" role="tabpanel" className="absolute inset-0">
             <AgentGraph />
           </div>
         )}
-        {activeTab === 'metrics' && <MetricsView />}
+        {activeTab === 'metrics' && (
+          <div id="metrics-panel" role="tabpanel" className="h-full overflow-hidden">
+            <MetricsView />
+          </div>
+        )}
       </div>
 
       {/* Footer with step count */}
-      <div className="px-4 py-2 border-t border-gray-700 text-xs text-gray-500">
+      <div className="px-4 py-2 border-t border-gray-700 text-xs text-gray-400">
         {steps.length} step{steps.length !== 1 ? 's' : ''} recorded
       </div>
     </div>

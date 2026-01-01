@@ -17,10 +17,10 @@ export function ChatPanel() {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold text-gray-100">Chat</h2>
+          <h1 className="text-lg font-semibold text-gray-100">Chat</h1>
           {(isProcessing || isExecuting) && (
-            <span className="node-badge node-badge-running">
-              <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse mr-1.5" />
+            <span className="node-badge node-badge-running" aria-live="polite" aria-label="Processing response">
+              <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse mr-1.5" aria-hidden="true" />
               Processing
             </span>
           )}
