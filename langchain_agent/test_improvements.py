@@ -25,7 +25,8 @@ from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 # Import agent components
-from main import LangChainAgent, CustomAgentState, DocumentGrade, ReflectionResult
+from main import LangChainAgent
+from agent_state import CustomAgentState, DocumentGrade, ReflectionResult
 from config import (
     DOCUMENT_GRADING_BATCH_SIZE,
     ENABLE_QUERY_EVAL_CACHE,

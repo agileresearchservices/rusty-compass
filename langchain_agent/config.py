@@ -4,6 +4,10 @@ Configuration constants for LangChain Agent
 
 import os
 from psycopg.rows import dict_row
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 __all__ = [
     # Ollama configuration
@@ -87,6 +91,27 @@ __all__ = [
     "REFLECTION_TRACK_TRANSFORMATION_EFFECTIVENESS",
     # Observable agent streaming configuration
     "ENABLE_ASYNC_STREAMING",
+    # API Security
+    "API_KEY",
+    "API_KEY_HEADER",
+    "API_KEY_QUERY_PARAM",
+    "RATE_LIMIT_CONVERSATIONS",
+    "RATE_LIMIT_CHAT",
+    "RATE_LIMIT_ENABLED",
+    # Logging
+    "LOG_LEVEL",
+    "LOG_FORMAT",
+    "LOG_INCLUDE_TIMESTAMP",
+    # LangSmith Observability
+    "LANGSMITH_API_KEY",
+    "LANGSMITH_PROJECT",
+    "LANGSMITH_TRACING_ENABLED",
+    # Advanced Streaming
+    "ENABLE_ASTREAM_EVENTS",
+    # Checkpoint Optimization
+    "CHECKPOINT_SELECTIVE_SERIALIZATION",
+    "CHECKPOINT_KEEP_VERSIONS",
+    "CHECKPOINT_COMPACTION_DAYS",
 ]
 
 # ============================================================================
@@ -355,3 +380,62 @@ REFLECTION_TRACK_TRANSFORMATION_EFFECTIVENESS = True
 #   - TRADEOFF: Timing may be slightly less accurate than legacy mode, but
 #     provides better UI responsiveness and prevents async event loop blocking
 ENABLE_ASYNC_STREAMING = True
+
+# ============================================================================
+# API SECURITY CONFIGURATION
+# ============================================================================
+
+# API Key authentication (REQUIRED)
+# Set API_KEY environment variable to enable authentication
+# The API will fail to start if API_KEY is not set
+API_KEY = os.getenv("API_KEY")
+API_KEY_HEADER = "X-API-Key"
+API_KEY_QUERY_PARAM = "api_key"  # For WebSocket authentication
+
+# Rate limiting configuration
+RATE_LIMIT_CONVERSATIONS = "10/minute"  # List/manage conversations
+RATE_LIMIT_CHAT = "20/minute"           # Chat requests (REST + WebSocket)
+RATE_LIMIT_ENABLED = True
+
+# ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_FORMAT = os.getenv("LOG_FORMAT", "console")  # "json" for production, "console" for development
+LOG_INCLUDE_TIMESTAMP = True
+
+# ============================================================================
+# LANGSMITH OBSERVABILITY CONFIGURATION
+# ============================================================================
+
+# LangSmith tracing (optional - requires API key from https://smith.langchain.com)
+# Enable by setting LANGSMITH_API_KEY environment variable
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
+LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "rusty-compass")
+LANGSMITH_TRACING_ENABLED = LANGSMITH_API_KEY is not None
+
+# ============================================================================
+# ADVANCED STREAMING CONFIGURATION
+# ============================================================================
+
+# Enable astream_events for fine-grained token-level streaming (EXPERIMENTAL)
+# When True: Uses LangGraph's astream_events v2 API for token-by-token streaming
+# When False: Uses existing streaming mode (entire node outputs)
+# Requires LangGraph >= 1.0.5
+ENABLE_ASTREAM_EVENTS = os.getenv("ENABLE_ASTREAM_EVENTS", "false").lower() == "true"
+
+# ============================================================================
+# CHECKPOINT OPTIMIZATION CONFIGURATION
+# ============================================================================
+
+# Enable selective state serialization (excludes large fields from checkpoints)
+# Reduces checkpoint size by ~10x by excluding retrieved_documents and document_grades
+# These fields are regenerated on retrieval, not needed for conversation continuity
+CHECKPOINT_SELECTIVE_SERIALIZATION = True
+
+# Number of recent checkpoint versions to keep per thread during compaction
+CHECKPOINT_KEEP_VERSIONS = 3
+
+# Compact checkpoints older than this many days
+CHECKPOINT_COMPACTION_DAYS = 7

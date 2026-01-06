@@ -7,6 +7,7 @@ import { MessageSquare, Trash2 } from 'lucide-react'
 import { useChatStore, type ConversationSummary } from '../../stores/chatStore'
 import { useObservabilityStore } from '../../stores/observabilityStore'
 import { ErrorNotification } from '../ErrorNotification'
+import { apiDelete } from '../../utils/api'
 import clsx from 'clsx'
 
 interface ConversationItemProps {
@@ -39,9 +40,7 @@ export function ConversationItem({ conversation, isActive, onSelect }: Conversat
     setDeleteError(null)
     setIsDeleting(true)
     try {
-      const response = await fetch(`http://localhost:8000/api/conversations/${conversation.thread_id}`, {
-        method: 'DELETE',
-      })
+      const response = await apiDelete(`/api/conversations/${conversation.thread_id}`)
       if (response.ok) {
         setConversations(conversations.filter((c) => c.thread_id !== conversation.thread_id))
       } else {

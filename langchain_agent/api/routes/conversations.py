@@ -2,16 +2,28 @@
 REST endpoints for managing conversations.
 """
 
+import sys
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
 import psycopg
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
-import sys
-sys.path.insert(0, '/Users/kevin/github/personal/rusty-compass/langchain_agent')
-from config import DATABASE_URL
+# Add parent directory to path for config import
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from config import DATABASE_URL, RATE_LIMIT_CONVERSATIONS
+from api.middleware.auth import verify_api_key
+from logging_config import get_logger
+
+logger = get_logger(__name__)
+
+# Initialize limiter
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
 
@@ -53,16 +65,30 @@ class DeleteResponse(BaseModel):
 
 
 @router.get("/conversations", response_model=List[ConversationSummary])
-async def list_conversations(limit: int = 20):
+@limiter.limit(RATE_LIMIT_CONVERSATIONS)
+async def list_conversations(
+    request: Request,
+    limit: int = Query(
+        default=20,
+        ge=1,
+        le=100,
+        description="Maximum conversations to return (1-100)"
+    )
+):
     """
     List all previous conversations with titles and dates.
 
+    Requires X-API-Key header for authentication.
+
     Args:
-        limit: Maximum number of conversations to return (default 20)
+        request: FastAPI request object (for auth and rate limiting)
+        limit: Maximum number of conversations to return (1-100, default 20)
 
     Returns:
         List of conversation summaries ordered by most recent first.
     """
+    await verify_api_key(request)
+
     try:
         with psycopg.connect(DATABASE_URL) as conn:
             with conn.cursor() as cur:
@@ -88,16 +114,22 @@ async def list_conversations(limit: int = 20):
 
 
 @router.get("/conversations/{thread_id}", response_model=ConversationDetail)
-async def get_conversation(thread_id: str):
+@limiter.limit(RATE_LIMIT_CONVERSATIONS)
+async def get_conversation(request: Request, thread_id: str):
     """
     Get full details of a specific conversation including messages.
 
+    Requires X-API-Key header for authentication.
+
     Args:
+        request: FastAPI request object (for auth and rate limiting)
         thread_id: The conversation thread ID
 
     Returns:
         Full conversation details with message history.
     """
+    await verify_api_key(request)
+
     try:
         with psycopg.connect(DATABASE_URL) as conn:
             with conn.cursor() as cur:
@@ -146,7 +178,7 @@ async def get_conversation(thread_id: str):
                                     "content": content,
                                 })
                     except Exception as e:
-                        print(f"Error decoding messages: {e}")
+                        logger.warning("message_decode_error", thread_id=thread_id, error=str(e))
 
                 return ConversationDetail(
                     thread_id=thread_id,
@@ -162,15 +194,23 @@ async def get_conversation(thread_id: str):
 
 
 @router.delete("/conversations", response_model=DeleteResponse)
-async def clear_all_conversations():
+@limiter.limit(RATE_LIMIT_CONVERSATIONS)
+async def clear_all_conversations(request: Request):
     """
     Delete all conversations and their history.
 
+    Requires X-API-Key header for authentication.
+
     WARNING: This is destructive and cannot be undone.
+
+    Args:
+        request: FastAPI request object (for auth and rate limiting)
 
     Returns:
         Count of deleted metadata and checkpoint records.
     """
+    await verify_api_key(request)
+
     try:
         with psycopg.connect(DATABASE_URL) as conn:
             conn.autocommit = True
@@ -198,16 +238,22 @@ async def clear_all_conversations():
 
 
 @router.delete("/conversations/{thread_id}")
-async def delete_conversation(thread_id: str):
+@limiter.limit(RATE_LIMIT_CONVERSATIONS)
+async def delete_conversation(request: Request, thread_id: str):
     """
     Delete a specific conversation.
 
+    Requires X-API-Key header for authentication.
+
     Args:
+        request: FastAPI request object (for auth and rate limiting)
         thread_id: The conversation thread ID to delete
 
     Returns:
         Success status.
     """
+    await verify_api_key(request)
+
     try:
         with psycopg.connect(DATABASE_URL) as conn:
             conn.autocommit = True
