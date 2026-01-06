@@ -102,6 +102,16 @@ __all__ = [
     "LOG_LEVEL",
     "LOG_FORMAT",
     "LOG_INCLUDE_TIMESTAMP",
+    # LangSmith Observability
+    "LANGSMITH_API_KEY",
+    "LANGSMITH_PROJECT",
+    "LANGSMITH_TRACING_ENABLED",
+    # Advanced Streaming
+    "ENABLE_ASTREAM_EVENTS",
+    # Checkpoint Optimization
+    "CHECKPOINT_SELECTIVE_SERIALIZATION",
+    "CHECKPOINT_KEEP_VERSIONS",
+    "CHECKPOINT_COMPACTION_DAYS",
 ]
 
 # ============================================================================
@@ -394,3 +404,38 @@ RATE_LIMIT_ENABLED = True
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FORMAT = os.getenv("LOG_FORMAT", "console")  # "json" for production, "console" for development
 LOG_INCLUDE_TIMESTAMP = True
+
+# ============================================================================
+# LANGSMITH OBSERVABILITY CONFIGURATION
+# ============================================================================
+
+# LangSmith tracing (optional - requires API key from https://smith.langchain.com)
+# Enable by setting LANGSMITH_API_KEY environment variable
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
+LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "rusty-compass")
+LANGSMITH_TRACING_ENABLED = LANGSMITH_API_KEY is not None
+
+# ============================================================================
+# ADVANCED STREAMING CONFIGURATION
+# ============================================================================
+
+# Enable astream_events for fine-grained token-level streaming (EXPERIMENTAL)
+# When True: Uses LangGraph's astream_events v2 API for token-by-token streaming
+# When False: Uses existing streaming mode (entire node outputs)
+# Requires LangGraph >= 1.0.5
+ENABLE_ASTREAM_EVENTS = os.getenv("ENABLE_ASTREAM_EVENTS", "false").lower() == "true"
+
+# ============================================================================
+# CHECKPOINT OPTIMIZATION CONFIGURATION
+# ============================================================================
+
+# Enable selective state serialization (excludes large fields from checkpoints)
+# Reduces checkpoint size by ~10x by excluding retrieved_documents and document_grades
+# These fields are regenerated on retrieval, not needed for conversation continuity
+CHECKPOINT_SELECTIVE_SERIALIZATION = True
+
+# Number of recent checkpoint versions to keep per thread during compaction
+CHECKPOINT_KEEP_VERSIONS = 3
+
+# Compact checkpoints older than this many days
+CHECKPOINT_COMPACTION_DAYS = 7

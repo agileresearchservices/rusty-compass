@@ -25,3 +25,6 @@ python-dotenv>=1.0.0
 
 # Structured logging
 structlog>=24.0.0
+
+# LangSmith observability (optional)
+langsmith>=0.1.0

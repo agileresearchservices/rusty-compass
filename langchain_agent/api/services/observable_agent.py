@@ -26,6 +26,7 @@ from config import (
     RERANKER_MODEL,
     REFLECTION_MAX_ITERATIONS,
     ENABLE_ASYNC_STREAMING,
+    ENABLE_ASTREAM_EVENTS,
 )
 
 from api.schemas.events import (
@@ -222,8 +223,18 @@ class ObservableAgentService:
           immediately and NodeEndEvent with accurate timing. This prevents blocking
           the async event loop and improves UI responsiveness.
           TRADEOFF: Timing may be slightly less accurate but better reactivity.
+
+        Additionally, ENABLE_ASTREAM_EVENTS can be set for fine-grained token-level
+        streaming using LangGraph's astream_events v2 API. This provides the most
+        responsive streaming experience with individual token emissions.
         """
-        if self._use_async_streaming:
+        if ENABLE_ASTREAM_EVENTS:
+            # FINE-GRAINED STREAMING MODE: Token-level events via astream_events v2
+            async for output in self._astream_graph_events(
+                initial_state, config, emit, node_start_times, metrics
+            ):
+                yield output
+        elif self._use_async_streaming:
             # IMPROVED STREAMING MODE: Emit events incrementally as they occur
             async for output in self._astream_graph_improved(
                 initial_state, config, emit, node_start_times, metrics
@@ -408,6 +419,116 @@ class ObservableAgentService:
             ))
 
             yield output
+
+    async def _astream_graph_events(
+        self,
+        initial_state: Dict[str, Any],
+        config: Dict[str, Any],
+        emit: EmitCallback,
+        node_start_times: Dict[str, float],
+        metrics: Dict[str, float],
+    ):
+        """
+        Fine-grained streaming mode using LangGraph's astream_events v2 API.
+
+        This mode provides the most responsive streaming experience by capturing:
+        - on_chain_start/on_chain_end: Node lifecycle events
+        - on_chat_model_stream: Individual LLM token chunks
+        - on_tool_start/on_tool_end: Tool execution events
+
+        Benefits over other modes:
+        - Token-by-token streaming to UI (vs entire node outputs)
+        - No custom event emission code needed (uses LangGraph's built-in events)
+        - More accurate event timing from LangGraph internals
+
+        Requires: LangGraph >= 1.0.5, ENABLE_ASTREAM_EVENTS = true
+        """
+        # Known LangGraph nodes to track (filter out internal chains)
+        tracked_nodes = {
+            "query_evaluator", "agent", "tools", "document_grader",
+            "query_transformer", "response_grader", "response_improver"
+        }
+        current_node: Optional[str] = None
+        accumulated_output: Dict[str, Any] = {}
+
+        try:
+            async for event in self._agent.app.astream_events(
+                initial_state,
+                config=config,
+                version="v2",
+            ):
+                event_type = event.get("event", "")
+                event_name = event.get("name", "")
+                event_data = event.get("data", {})
+
+                # Handle node lifecycle events
+                if event_type == "on_chain_start":
+                    if event_name in tracked_nodes:
+                        current_node = event_name
+                        node_start_times[event_name] = time.time()
+
+                        await emit(NodeStartEvent(
+                            node=event_name,
+                            input_summary=f"Starting {event_name}",
+                        ))
+
+                elif event_type == "on_chain_end":
+                    if event_name in tracked_nodes:
+                        duration_ms = 0.0
+                        if event_name in node_start_times:
+                            duration_ms = (time.time() - node_start_times[event_name]) * 1000
+                            metrics[event_name] = metrics.get(event_name, 0) + duration_ms
+
+                        # Extract output from event
+                        output = event_data.get("output", {})
+                        if isinstance(output, dict):
+                            accumulated_output.update(output)
+
+                            # Emit node-specific events
+                            await self._emit_node_events(event_name, output, emit)
+
+                        await emit(NodeEndEvent(
+                            node=event_name,
+                            duration_ms=duration_ms,
+                            output_summary=self._summarize_output(event_name, output if isinstance(output, dict) else {}),
+                        ))
+
+                        # Yield the output for state tracking
+                        if isinstance(output, dict) and output:
+                            yield output
+
+                # Handle LLM token streaming (the key improvement)
+                elif event_type == "on_chat_model_stream":
+                    chunk = event_data.get("chunk")
+                    if chunk:
+                        # Handle different chunk formats
+                        content = None
+                        if hasattr(chunk, "content") and chunk.content:
+                            content = chunk.content
+                        elif isinstance(chunk, dict) and "content" in chunk:
+                            content = chunk["content"]
+
+                        if content:
+                            # Emit token chunk directly to WebSocket
+                            await emit(LLMResponseChunkEvent(
+                                content=content,
+                                is_complete=False,
+                            ))
+
+                # Handle tool events
+                elif event_type == "on_tool_start":
+                    tool_name = event_name
+                    tool_input = event_data.get("input", {})
+                    await emit(ToolCallEvent(
+                        tool_name=tool_name,
+                        tool_args=tool_input if isinstance(tool_input, dict) else {"query": str(tool_input)},
+                    ))
+
+        except Exception as e:
+            # Log error and fall back to yielding accumulated state
+            print(f"Error in astream_events: {e}")
+            if accumulated_output:
+                yield accumulated_output
 
     async def _emit_node_events(
         self,

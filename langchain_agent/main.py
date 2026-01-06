@@ -47,6 +47,14 @@ from reranker import BGEReranker
 from vector_store import SimplePostgresVectorStore, PostgresRetriever
 
 # ============================================================================
+# LANGSMITH TRACING (Optional - enable with LANGSMITH_API_KEY env var)
+# ============================================================================
+import os
+if os.getenv("LANGSMITH_API_KEY"):
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGSMITH_PROJECT", "rusty-compass")
+
+# ============================================================================
 # STREAMING EVENT DEFINITIONS
 # ============================================================================
 
@@ -293,8 +301,15 @@ class LangChainAgent:
             self.reranker = None
 
         # Initialize checkpointer with existing pool
-        self.checkpointer = PostgresSaver(self.pool)
-        print("✓ Postgres checkpoint store initialized")
+        # Use selective serialization to reduce checkpoint size if enabled
+        from config import CHECKPOINT_SELECTIVE_SERIALIZATION
+        if CHECKPOINT_SELECTIVE_SERIALIZATION:
+            from checkpoint_optimizer import SelectiveJsonPlusSerializer
+            self.checkpointer = PostgresSaver(self.pool, serde=SelectiveJsonPlusSerializer())
+            print("✓ Postgres checkpoint store initialized (selective serialization)")
+        else:
+            self.checkpointer = PostgresSaver(self.pool)
+            print("✓ Postgres checkpoint store initialized")
 
         # Ensure conversation metadata table exists
         self._ensure_metadata_table()
