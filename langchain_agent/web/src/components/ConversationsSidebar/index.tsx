@@ -9,6 +9,7 @@ import { useObservabilityStore } from '../../stores/observabilityStore'
 import { ConversationItem } from './ConversationItem'
 import { ErrorNotification } from '../ErrorNotification'
 import { SkeletonConversationItem } from '../SkeletonLoader'
+import { apiGet, apiDelete } from '../../utils/api'
 
 interface ConversationsSidebarProps {
   onConversationSelect?: () => void
@@ -37,7 +38,7 @@ export function ConversationsSidebar({ onConversationSelect }: ConversationsSide
     setConversationsLoading(true)
     setError(null)
     try {
-      const response = await fetch('http://localhost:8000/api/conversations?limit=20')
+      const response = await apiGet('/api/conversations?limit=20')
       if (response.ok) {
         const data: ConversationSummary[] = await response.json()
         setConversations(data)
@@ -65,9 +66,7 @@ export function ConversationsSidebar({ onConversationSelect }: ConversationsSide
 
     setError(null)
     try {
-      const response = await fetch('http://localhost:8000/api/conversations', {
-        method: 'DELETE',
-      })
+      const response = await apiDelete('/api/conversations')
       if (response.ok) {
         setConversations([])
         handleNewConversation()

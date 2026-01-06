@@ -4,7 +4,7 @@
 import sys
 import time
 from langchain_core.documents import Document
-from main import BGEReranker
+from reranker import BGEReranker
 
 
 def show_reranking_comparison(query: str, original_docs, reranked_results):

@@ -119,7 +119,8 @@ export function useWebSocket(): UseWebSocketReturn {
 
     // Build WebSocket URL - connect to backend on port 8000
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${protocol}//localhost:8000/ws/chat?thread_id=${threadId}`
+    const apiKey = import.meta.env.VITE_API_KEY || ''
+    const url = `${protocol}//localhost:8000/ws/chat?thread_id=${threadId}&api_key=${encodeURIComponent(apiKey)}`
 
     console.log('Connecting to WebSocket:', url)
     const ws = new WebSocket(url)

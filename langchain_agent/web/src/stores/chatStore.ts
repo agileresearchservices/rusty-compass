@@ -4,6 +4,7 @@
  */
 
 import { create } from 'zustand'
+import { apiGet } from '../utils/api'
 
 // Message type for chat display
 export interface ChatMessage {
@@ -155,7 +156,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ threadId, connectionError: null })
 
       console.log('Loading conversation:', threadId)
-      const response = await fetch(`http://localhost:8000/api/conversations/${threadId}`)
+      const response = await apiGet(`/api/conversations/${threadId}`)
 
       console.log('Conversation API response:', response.status, response.statusText)
 

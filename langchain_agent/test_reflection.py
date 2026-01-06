@@ -55,7 +55,7 @@ def test_state_types():
     print("=" * 70)
 
     try:
-        from main import DocumentGrade, ReflectionResult, CustomAgentState
+        from agent_state import DocumentGrade, ReflectionResult, CustomAgentState
 
         # Test DocumentGrade
         doc_grade: DocumentGrade = {

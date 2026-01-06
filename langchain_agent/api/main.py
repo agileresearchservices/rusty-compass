@@ -5,10 +5,33 @@ This is the main entry point for the LangChain Agent API.
 Run with: uvicorn api.main:app --reload --port 8000
 """
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import sys
+from pathlib import Path
 
+# Add parent directory to path for config import
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+from config import RATE_LIMIT_ENABLED, API_KEY
 from api.routes import health, conversations, chat
+from api.middleware.auth import AuthConfigurationError
+from logging_config import configure_logging, get_logger
+
+# Configure structured logging
+configure_logging()
+logger = get_logger(__name__)
+
+# Initialize rate limiter
+limiter = Limiter(
+    key_func=get_remote_address,
+    enabled=RATE_LIMIT_ENABLED,
+)
 
 app = FastAPI(
     title="LangChain Agent API",
@@ -17,6 +40,12 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Add rate limiter to app state
+app.state.limiter = limiter
+
+# Register rate limit exceeded handler
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS configuration for local development
 app.add_middleware(
@@ -43,19 +72,26 @@ app.include_router(chat.router, tags=["chat"])
 @app.on_event("startup")
 async def startup_event():
     """Initialize resources on startup."""
-    print("=" * 60)
-    print("LangChain Agent API Starting...")
-    print("=" * 60)
-    print("  REST API:    http://localhost:8000/api")
-    print("  WebSocket:   ws://localhost:8000/ws/chat")
-    print("  API Docs:    http://localhost:8000/docs")
-    print("=" * 60)
+    # Validate API_KEY is configured
+    if not API_KEY:
+        raise AuthConfigurationError(
+            "API_KEY environment variable is not set. "
+            "Authentication is required. Set API_KEY in your .env file."
+        )
+
+    logger.info(
+        "api_started",
+        rest_api="http://localhost:8000/api",
+        websocket="ws://localhost:8000/ws/chat",
+        docs="http://localhost:8000/docs",
+        auth_required=True,
+    )
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup resources on shutdown."""
-    print("LangChain Agent API shutting down...")
+    logger.info("api_shutting_down")
     # Clean up the connection manager and agent service
     await chat.manager.shutdown()
-    print("Cleanup complete.")
+    logger.info("api_shutdown_complete")

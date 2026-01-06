@@ -4,7 +4,7 @@
 import time
 from langchain_ollama import OllamaEmbeddings
 from psycopg_pool import ConnectionPool
-from main import SimplePostgresVectorStore
+from vector_store import SimplePostgresVectorStore
 from config import (
     EMBEDDINGS_MODEL,
     DATABASE_URL,

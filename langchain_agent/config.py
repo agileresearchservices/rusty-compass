@@ -4,6 +4,10 @@ Configuration constants for LangChain Agent
 
 import os
 from psycopg.rows import dict_row
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 __all__ = [
     # Ollama configuration
@@ -87,6 +91,17 @@ __all__ = [
     "REFLECTION_TRACK_TRANSFORMATION_EFFECTIVENESS",
     # Observable agent streaming configuration
     "ENABLE_ASYNC_STREAMING",
+    # API Security
+    "API_KEY",
+    "API_KEY_HEADER",
+    "API_KEY_QUERY_PARAM",
+    "RATE_LIMIT_CONVERSATIONS",
+    "RATE_LIMIT_CHAT",
+    "RATE_LIMIT_ENABLED",
+    # Logging
+    "LOG_LEVEL",
+    "LOG_FORMAT",
+    "LOG_INCLUDE_TIMESTAMP",
 ]
 
 # ============================================================================
@@ -355,3 +370,27 @@ REFLECTION_TRACK_TRANSFORMATION_EFFECTIVENESS = True
 #   - TRADEOFF: Timing may be slightly less accurate than legacy mode, but
 #     provides better UI responsiveness and prevents async event loop blocking
 ENABLE_ASYNC_STREAMING = True
+
+# ============================================================================
+# API SECURITY CONFIGURATION
+# ============================================================================
+
+# API Key authentication (REQUIRED)
+# Set API_KEY environment variable to enable authentication
+# The API will fail to start if API_KEY is not set
+API_KEY = os.getenv("API_KEY")
+API_KEY_HEADER = "X-API-Key"
+API_KEY_QUERY_PARAM = "api_key"  # For WebSocket authentication
+
+# Rate limiting configuration
+RATE_LIMIT_CONVERSATIONS = "10/minute"  # List/manage conversations
+RATE_LIMIT_CHAT = "20/minute"           # Chat requests (REST + WebSocket)
+RATE_LIMIT_ENABLED = True
+
+# ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_FORMAT = os.getenv("LOG_FORMAT", "console")  # "json" for production, "console" for development
+LOG_INCLUDE_TIMESTAMP = True

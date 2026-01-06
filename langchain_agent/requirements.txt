@@ -18,3 +18,10 @@ uvicorn[standard]>=0.32.0
 websockets>=14.0
 httpx>=0.28.0
 pydantic>=2.10.0
+
+# Security and rate limiting
+slowapi>=0.1.9
+python-dotenv>=1.0.0
+
+# Structured logging
+structlog>=24.0.0
